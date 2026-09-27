@@ -1,6 +1,6 @@
 # Digital Lab Coach (DLC)
 
-[![Download](docs/download_button.svg)](https://github.com/KraLurmumcoelcarix-173/Digital-Lab-Coach-v0.1.2.2/releases/latest/download/DigitalLabCoach.zip)
+[![Download](docs/download_button.svg)](https://github.com/KraLurmumcoelcarix-173/Digital-Lab-Coach-v0.1.2.3/releases/latest/download/DigitalLabCoach.zip)
 
 A hybrid deterministic-checker + LLM feedback tool for debugging
 [Digital](https://github.com/hneemann/Digital) circuit labs.
@@ -30,8 +30,8 @@ v0.1.0 (2026/8/23) — first packaged release.
   - [Working offline](#working-offline)
   - [Telemetry statement](#telemetry-statement)
   - [Uninstalling](#uninstalling)
-- [Instructor setup](#instructor-setup)
-  - [Tokens, proxy, and hosting](#tokens-proxy-and-hosting)
+- [Instructor quick setup](#instructor-quick-setup)
+- [Instructor optional setup](#instructor-optional-setup)
   - [Changing the limits](#changing-the-limits)
   - [Adapting the course syllabus](#adapting-the-course-syllabus-layer-2-lecture-tags)
   - [Subcircuits as formula models](#subcircuits-as-formula-models-layer-3-mode-a)
@@ -52,9 +52,7 @@ v0.1.0 (2026/8/23) — first packaged release.
 - **Student in a course using DLC** → Quick start (students) below.
   Your instructor gives you a course-server URL + token — you do NOT
   need any API key.
-- **Instructor releasing DLC for a course** → Instructor setup below,
-  with the full runbook in
-  [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md).
+- **Instructor running DLC for a course** → [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md).
 - **Developer** → Developer setup below.
 
 ## Quick start (students)
@@ -67,21 +65,23 @@ v0.1.0 (2026/8/23) — first packaged release.
    `http://127.0.0.1:8765`. If macOS answers *permission denied*, run
    `chmod +x start.sh uninstall.sh` once in that folder and try again.
 
-3. Open **Settings (gear icon, top right)**:
+3. Read the consent form that opens on the first start and choose Agree
+   or Decline.
+4. Walk through the tutor that opens next.
+5. `Digital.jar`: the first run asks where it is - the same jar you run
+   labs with (see the Digital.jar section below if you don't have one). If
+   you closed that dialog, it is under **Settings → Digital.jar**.
+6. Open **Settings (gear icon, top right)**:
    - **Course server**: paste the **URL + course token** from your
      instructor and save; it answers *connected — token accepted ✓*. That
-     powers all AI features — no personal API key needed. If your
-     instructor announces a new URL or token later, paste it in the same
-     place (press **Disconnect** first if an old one is shown).
-   - **Language**: pick yours if you wish; the interface switches at once. 
-     AI answers stay in English.
+     powers all AI features. If your instructor announces a new URL or token
+     later, paste it in the same place (press **Disconnect** first if an old one is shown).
+   - **Language**: pick yours if you wish; the translation cannot yet be guaranteed to 
+     sound natural. AI answers stay in English.
 
 ![Course server settings](docs/screenshots/settings_course_server.png)
 
-4. `Digital.jar`: the first run asks where it is — the same jar you run
-   labs with (see the Digital.jar section below if you don't have one). If
-   you closed that dialog, it is under **Settings → Digital.jar**.
-5. Upload your `.dig` files and start debugging: interactive graph, structural
+7. Upload your `.dig` files and start debugging: interactive graph, structural
    issues, per-row tests, signal flow, and the Layer 2/3 AI coach.
 
 ![A verified Mode A fix card](docs/screenshots/mode_a_card.png)
@@ -127,30 +127,41 @@ of DLC in order to apply it to student and collect related student data.
 Run **`UNINSTALL.bat`** / **`./uninstall.sh`** removes the tool's local
 data folder `~/.dlc` and delete the unzipped folder.
 
-## Instructor setup
+## Instructor quick setup
 
-The detailed version: [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md):
+[docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md);
+Use the built-in data collection only with IRB approval from your
+department.
 
-1. Fork this repository; configure the official test set (and manifest,
-   if your labs go beyond the built-ins): step-by-step:
-   [docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md).
-2. Labs whose instruction ROM must hold a fixed course program (loaded
-   into an empty ROM for test runs, checked word for word before Mode A):
-   [docs/instructor_rom_config.md](docs/instructor_rom_config.md).
-3. Generate the two course secrets, deploy the course proxy (holds YOUR
-   API key), and hand students your release URL + the proxy URL + course
-   token.
+1. **Get a Claude API key** at [console.anthropic.com](https://console.anthropic.com)
+   → API keys → Create key. It lives on the course server only; students
+   never see it, and DLC caps daily spend.
+2. **Generate the course token and the admin token**: two one-line commands
+   (guide Step 2). Students get the course token; the admin token is yours.
+3. **Put the key and the two tokens into the course server** you chose:
+   Carolina CloudApps, one Secret with three values (guide 3B), or your own
+   laptop, three lines in a terminal (guide 3A).
+4. **Launch it and check the health page once**: four `true` flags (guide
+   Step 4).
+5. **Distribute the course server URL and the course token** to students
+   (guide Step 5). The dashboard is the same URL plus `/admin/view`, opened
+   with the admin token.
+6. **To use the tool yourself**, follow the Quick start (students) above.
 
-### Tokens, proxy, and hosting
+## Instructor optional setup
 
-Generating the two secrets, running the proxy on your own laptop for one
-LAN (Option A) or on Carolina CloudApps for an HTTPS URL that works from
-anywhere (Option B), finding the address students paste, and the checks to
-run before class are one runbook: [docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md)
-§2–§4. Option B is a handful of console forms; the repo ships the container
-(`proxy/Dockerfile`) and the `oc` manifest (`proxy/openshift/`). Use the built-in proxy only with IRB permission from your
-department; without a data-collection study, adapt
-[`proxy/dlc_proxy.py`](proxy/dlc_proxy.py) to your classroom.
+Only if you change how DLC works, for example for another course:
+
+1. **Fork** this repository.
+2. **Adjust** the proxy limits, the lab manifests, the official tests, the
+   ROM program a lab must hold, or the lecture list the AI cites. Where each
+   one lives: the guide's
+   [Appendix A](docs/RELEASE_GUIDE.md#appendix-a-optional-setup-fork-and-adapt),
+   with [proxy/README.md](proxy/README.md) for the server and
+   [docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md) for manifests.
+3. **Run the Instructor quick setup** with your fork as the source, and
+   build your own zip (guide A.6).
+
 
 ### Changing the limits
 
