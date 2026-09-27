@@ -16,7 +16,7 @@ education and explore new means of interactive hardware design debugging.
 ![Dashboard view of mode A gif](docs/screenshots/modeA_sample.gif)
 
 ## Status
-v0.1.2.3 (2026/9/24) — The course proxy runs on Carolina CloudApps, admin page rewritten.  
+v0.1.2.3 (2026/9/24) — The course proxy runs on Carolina CloudApps, admin page rewritten.
 v0.1.2.2 (2026/9/23) — Option A (local proxy + LAN) setup flow rewritten.
 v0.1.2.1 (2026/9/17) — Interface available in multi-language && a few small bug fixing.
 v0.1.2 (2026/9/10) — Mode A supports higher fixes with optimized latency and cost, signal flow walkthrough feature added in Layer 2.
@@ -30,14 +30,7 @@ v0.1.0 (2026/8/23) — first packaged release.
   - [Working offline](#working-offline)
   - [Telemetry statement](#telemetry-statement)
   - [Uninstalling](#uninstalling)
-- [Instructor quick setup](#instructor-quick-setup)
-- [Instructor optional setup](#instructor-optional-setup)
-  - [Changing the limits](#changing-the-limits)
-  - [Adapting the course syllabus](#adapting-the-course-syllabus-layer-2-lecture-tags)
-  - [Subcircuits as formula models](#subcircuits-as-formula-models-layer-3-mode-a)
-  - [The admin dashboard](#the-admin-dashboard)
-  - [Rotating the course token](#rotating-the-course-token)
-  - [Where to change what](#where-to-change-what)
+- [Instructor setup](#instructor-setup)
 - [File layout](#file-layout)
 - [Design](#design)
 - [Developer setup](#developer-setup)
@@ -127,130 +120,20 @@ of DLC in order to apply it to student and collect related student data.
 Run **`UNINSTALL.bat`** / **`./uninstall.sh`** removes the tool's local
 data folder `~/.dlc` and delete the unzipped folder.
 
-## Instructor quick setup
+## Instructor setup
 
-[docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md);
+[docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md):
+
+- **Quick setup, Steps 1 to 6**
+- **Optional setup, Appendix A**: fork and adapt the limits, the lab
+  manifests, the official tests, the ROM programs or the lecture list, and
+  build your own zip. Deeper references: [proxy/README.md](proxy/README.md)
+  and [docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md).
+- **Operating the server, Appendix B**: rotating tokens, updating the code,
+  backups, what breaks.
+
 Use the built-in data collection only with IRB approval from your
 department.
-
-1. **Get a Claude API key** at [console.anthropic.com](https://console.anthropic.com)
-   → API keys → Create key. It lives on the course server only; students
-   never see it, and DLC caps daily spend.
-2. **Generate the course token and the admin token**: two one-line commands
-   (guide Step 2). Students get the course token; the admin token is yours.
-3. **Put the key and the two tokens into the course server** you chose:
-   Carolina CloudApps, one Secret with three values (guide 3B), or your own
-   laptop, three lines in a terminal (guide 3A).
-4. **Launch it and check the health page once**: four `true` flags (guide
-   Step 4).
-5. **Distribute the course server URL and the course token** to students
-   (guide Step 5). The dashboard is the same URL plus `/admin/view`, opened
-   with the admin token.
-6. **To use the tool yourself**, follow the Quick start (students) above.
-
-## Instructor optional setup
-
-Only if you change how DLC works, for example for another course:
-
-1. **Fork** this repository.
-2. **Adjust** the proxy limits, the lab manifests, the official tests, the
-   ROM program a lab must hold, or the lecture list the AI cites. Where each
-   one lives: the guide's
-   [Appendix A](docs/RELEASE_GUIDE.md#appendix-a-optional-setup-fork-and-adapt),
-   with [proxy/README.md](proxy/README.md) for the server and
-   [docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md) for manifests.
-3. **Run the Instructor quick setup** with your fork as the source, and
-   build your own zip (guide A.6).
-
-
-### Changing the limits
-
-| Layer | Counts | Default | Change it in |
-|---|---|---|---|
-| Per-student daily caps | runs/day, on the student's machine | Mode A 1, Mode B 2 | `CAPS` at the top of [`dlc/l3/limits.py`](dlc/l3/limits.py); the caps only count when the student app runs with `DLC_ENFORCE_LIMITS=1` (the release launchers set it; a developer checkout runs uncapped) |
-| Per-machine backstop | LLM calls/day per machine, server-side | modeA 4, modeB 4, grade 2, explain 2 | `CALL_BUDGETS` at the top of [`proxy/dlc_proxy.py`](proxy/dlc_proxy.py) |
-| Whole-server circuit breaker | calls/day and estimated $/day, whole class | 600 calls, $20 | env `DLC_GLOBAL_DAILY_CALLS`, `DLC_GLOBAL_DAILY_USD` on the proxy |
-
-A Mode A run only counts against the daily cap when it delivers a
-verified card; a refused or empty run is free. More in
-[docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md).
-
-### Adapting the course syllabus (Layer 2 lecture tags)
-
-Layer 2 cites lectures from one hard-coded list. When your syllabus
-changes (or you fork DLC for another course):
-
-1. Edit `SYLLABUS_311` near the top of
-   [`dlc/llm/explain.py`](dlc/llm/explain.py): one line per lecture,
-   in the form `Lecture N: topic`. Both the Layer 2 summary and its
-   grader tag lectures against this list.
-2. Optional: the course name "UNC COMP 311" also appears in the prompt
-   headers under [`prompts/`](prompts/) and in `dlc/llm/explain.py`.
-3. Restart the server.
-
-### Subcircuits as formula models (Layer 3 Mode A)
-
-Mode A only starts once every subcircuit passes its own tests, so while
-it debugs the top circuit it does not simulate a passing child gate by
-gate: it evaluates the child's **formula model** instead.
-
-There is nothing to configure for the shipped 311 labs: a model is picked by the
-child's interface and is used only after it reproduces every row of that
-child's own testcase. A child without a testcase
-is simulated as drawn. To name, force or switch off a model per file,
-add a `subcircuits` block to the lab manifest — see
-[docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md); the same block carries
-the one-line `role` of each subcircuit. Layer 1's signal flow never uses
-models.
-
-Two CPU manifests ship for UNC 311: `data/manifests/cpu.json` for the eight-instruction
-Lab 5 subset and `data/manifests/cpu_new.json` for the full 37-instruction
-RV32I CPU (`cpu_new.dig` tree). For the RV32I lab the Coverage Coach runs 
-the program through a small RV32I interpreter, follows its branches and jumps
-and splices any extension in  front of the loop since that program parks in a 
-`jal x0, 0` halt loop, where it actually executes.
-
-### The admin dashboard
-
-Open the course server URL + `/admin/view` (Option A
-`http://<LAN address>:8321/admin/view`, Option B
-`https://dlc-proxy-<project>.apps.cloudapps.unc.edu/admin/view`) and enter
-the admin token once: machines, per-day activity, per-day LLM usage and
-estimated spend, breaker state, Layer 1 verdicts, test runs, coach outcomes
-and the shape of edits between uploads. Raw exports:
-`/admin/export.csv?table=events|machines|llm_calls`.
-
-![Course dashboard](docs/screenshots/admin_dashboard.png)
-![Course dashboard](docs/screenshots/admin_dashboard2.png)
-
-### Rotating the course token
-
-Generate a new course token, restart the proxy with it (Option A) or edit
-the Secret and restart the rollout (Option B), announce it; students paste
-the new token under Settings → Course server. History and limits are
-untouched.
-
-### Where to change what
-
-Everything an instructor may want to adjust, and the one place it lives.
-Restart the server (or the proxy) after changing any of these.
-
-| To change… | Edit / set |
-|---|---|
-| Daily caps, per-machine budgets, whole-class breaker | the three rows in [Changing the limits](#changing-the-limits) |
-| Course token / admin token | proxy env `DLC_COURSE_TOKEN`, `DLC_ADMIN_TOKEN`; under Option B the Secret `dlc-proxy-secrets` ([Rotating the course token](#rotating-the-course-token)) |
-| Where the proxy keeps its ledger | proxy env `DLC_PROXY_DB` (default `./dlc_proxy.db`; the container uses the volume at `/data/dlc_proxy.db`) |
-| Which model each Layer 3 mode uses | The picker on each Layer 3 board (Sonnet default or Opus, per run). The default behind "Sonnet (default)" comes from env DLC_L3_DEBUG_MODEL/DLC_L3_PROPOSE_MODEL, else the l3_debug_model/l3_propose_modelkeys in~/.dlc/config.json|
-| LLM call timeout | env `DLC_LLM_TIMEOUT` (seconds, default 180) |
-| Lecture list Layer 2 cites | `SYLLABUS_311` in [`dlc/llm/explain.py`](dlc/llm/explain.py) ([Adapting the course syllabus](#adapting-the-course-syllabus-layer-2-lecture-tags)) |
-| Lab categories, subcircuit roles and formula models, program decode | one manifest per lab in [`data/manifests/`](data/manifests/) ([docs/MANIFEST_GUIDE.md](docs/MANIFEST_GUIDE.md))|
-| Which files Mode A analyzes even when most rows fail (no lazy gate) | the `no_lazy_gate` list in that lab's manifest; the shipped CPU manifests list the control unit |
-| Official tests | Settings ⚙ → Official tests (`~/.dlc/official_tests.json`), shipped defaults in `data/official_tests_defaults.json` |
-| The course program a lab's instruction ROM must hold | the `runtime` entry in `data/official_tests_defaults.json` ([docs/instructor_rom_config.md](docs/instructor_rom_config.md)) |
-| Solution circuits used to double-check mode B proposals if necessary| env `DLC_REFERENCE_DIR` on YOUR machine only; leave `reference_dir: null` in manifests |
-| The formula models themselves | [`dlc/sim/models.py`](dlc/sim/models.py) - one function per known subcircuit, each validated against the child's own testcase before use |
-| Digital.jar location | first-run dialog, Settings, or env `DIGITAL_JAR` |
-| Release version | `version` in `pyproject.toml` ([docs/RELEASE_GUIDE.md](docs/RELEASE_GUIDE.md)) |
 
 ## File layout
 
