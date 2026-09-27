@@ -1,19 +1,13 @@
 # Instructor Guide: set up DLC for a course (Last updated: 9/27/26)
 
-Six steps, one afternoon, no fork and no code change. You get an API key,
-make two tokens, put the three values into a small course server, launch
-it, and hand students one URL and one token. Students never see the key.
-
 Everything optional, such as forking DLC for another course, changing limits or
 lab manifests, sits in [Appendix A](#appendix-a-optional-setup-fork-and-adapt).
-Day-to-day operation and troubleshooting sit in
+Proxy operation and troubleshooting sit in
 [Appendix B](#appendix-b-operating-the-course-server).
 
 ## Step 1: Get a Claude API key
 
-1. Sign in at [console.anthropic.com](https://console.anthropic.com), add
-   billing, open **API keys**, **Create key**, copy it once.
-2. Paste it into the course card below. It goes into the course server only.
+1. Copy the key
 
 DLC caps spend: 600 calls and $20 per day for the whole class by default,
 plus per-student and per-machine daily limits.
@@ -27,14 +21,13 @@ python -c "import secrets; print('course-' + secrets.token_urlsafe(18))"
 python -c "import secrets; print('admin-'  + secrets.token_urlsafe(18))"
 ```
 
-Fill in this **course card** and keep it in a private note outside any git
-folder. Every later step reads from it.
+Fill in this **course card** and keep it in a private note for look up.
 
 | Course card | Your value | Who sees it |
 |---|---|---|
 | API key | `sk-ant-…` | the course server only |
-| Course token | `course-…` | students, pasted once into DLC |
-| Admin token | `admin-…` | you, on the dashboard |
+| Course token | `course-…` | students and you |
+| Admin token | `admin-…` | you only |
 | Course server URL | filled in at Step 4 | students and you |
 
 ## Step 3: Put the three values into the course server
@@ -45,8 +38,8 @@ Pick one place to run the server:
 |---|---|---|
 | Reachable from | anywhere, HTTPS | the same Wi-Fi only, plain HTTP |
 | Stays up | always, restarts itself | while the laptop is awake and the terminal open |
-| Good for | the semester | a smoke test or one section in one room |
-| Setup | console forms, about 20 minutes | one terminal window, 5 minutes |
+| Good for | a semester of use| a smoke test or one section in one room |
+| Setup | ~ 20 minutes | ~ 5 minutes |
 
 Do **3B** or **3A**, not both.
 
@@ -57,7 +50,7 @@ free to UNC affiliates. Open `console.apps.cloudapps.unc.edu`, Developer
 view, and create a project if you have none. Its name is `<project>` below.
 
 **3B.1 The Secret.** Left menu **Secrets** → **Create** → **Key/value
-secret**. Name `dlc-proxy-secrets`, three keys with the card's values:
+secret**. Name `dlc-proxy-secrets`, then add three kv pairs from note:
 `ANTHROPIC_API_KEY`, `DLC_COURSE_TOKEN`, `DLC_ADMIN_TOKEN`. Create.
 
 **3B.2 Import the server.** **+Add** → **Import from Git**, fill in top to
@@ -65,7 +58,7 @@ bottom, then **Create**:
 
 | Field | Value |
 |---|---|
-| Git Repo URL | `https://github.com/KraLurmumcoelcarix-173/Digital-Lab-Coach-v0.1.2.2` (or your fork), wait for *Validated* |
+| Git Repo URL | `https://github.com/KraLurmumcoelcarix-173/Digital-Lab-Coach-v0.1.2.3` (or your fork), wait for *Validated* |
 | Git reference | `master` |
 | Context dir | `/` |
 | Edit Import Strategy | **Dockerfile**, path `proxy/Dockerfile` |
@@ -90,7 +83,7 @@ Checks**: a Readiness probe and a Liveness probe, both HTTP GET on
 `/v1/health`, port 8080. Add.
 
 Your course server URL is `https://dlc-proxy-<project>.apps.cloudapps.unc.edu`.
-Write it on the card.
+Write it on the card note.
 
 ### 3A: Your own laptop
 
@@ -134,7 +127,7 @@ uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 A clean start prints no `WARNING:` line. Then find the laptop's address on
 the network: Windows `ipconfig` (the IPv4 Address of the connected adapter),
 macOS `ipconfig getifaddr en0`, Linux `hostname -I`. Your course server URL
-is `http://<that address>:8321`. Write it on the card.
+is `http://<LAN address>:8321`. Write it on the card.
 
 ## Step 4: Check it once
 
@@ -160,7 +153,7 @@ yourself.
 
 Students paste the URL and the token under Settings → Course server in DLC;
 it answers *connected — token accepted ✓*. Nothing else is needed on their
-side.
+side other picking digital.jar location.
 
 ## Step 6: Use it yourself and watch the dashboard
 
@@ -170,7 +163,7 @@ URL and token.
 The dashboard is the course server URL plus `/admin/view`, opened with the
 admin token: machines seen, activity per day, LLM calls and estimated spend
 against the caps, Layer 1 verdicts, test runs, and coach outcomes for both
-modes. CSV exports: `/admin/export.csv?table=events|machines|llm_calls`.
+modes.
 
 ![Course dashboard](screenshots/admin_dashboard.png)
 ![Course dashboard, stats](screenshots/admin_dashboard2.png)
@@ -179,23 +172,13 @@ Use the data collection only with IRB approval from your department.
 
 ## Student setup
 
-What students do, so you can answer questions; the README's Student quick
-setup says the same:
-
-1. Download the zip from the README's Download button and unzip it anywhere.
-2. Start it: `START_HERE.bat` on Windows, `./start.sh` on macOS/Linux (if
-   macOS answers *permission denied*, `chmod +x start.sh uninstall.sh` once).
-3. Read the consent form on the first start and choose Agree or Decline.
-4. Walk through the tutor that opens next.
-5. Point DLC at `Digital.jar` when asked.
-6. Settings → Course server: paste the URL and the course token.
+Same as the README's Student quick setup
 
 ## Appendix A: Optional setup (fork and adapt)
 
 Only for a course that changes how DLC works. Fork the repository, change
-what the table says, run the suite (`uv run pytest -q` with `DIGITAL_JAR`
-set), then do Steps 1 to 6 with your fork as the source: its GitHub URL in
-3B.2, its folder in 3A. A.6 builds your own release zip.
+what the table says, run the suite (`uv run pytest -q`), then do Steps 1 to 6 above
+with your fork as the source. And A.6 below builds your own release zip.
 
 ### A.1 What to adapt and where
 
@@ -218,9 +201,8 @@ set), then do Steps 1 to 6 with your fork as the source: its GitHub URL in
 
 A Mode A run counts against the student cap only when it delivers a verified
 card. One Mode A run makes one to four LLM calls and one Mode B run two or
-three, so the per-machine backstop counts calls, not runs; 4 is the floor
-that lets an honest day through. When the breaker trips, every AI request
-answers "the course server has reached its daily capacity" until midnight.
+three, so the per-machine backstop counts calls, not runs; When the breaker trips, 
+every AI request answers "the course server has reached its daily capacity" until midnight.
 
 ### A.3 Adapting the course syllabus (Layer 2 lecture tags)
 
@@ -242,8 +224,8 @@ force or switch off a model per file, add a `subcircuits` block to the lab
 manifest ([MANIFEST_GUIDE.md](MANIFEST_GUIDE.md)); the same block carries
 each subcircuit's one-line `role`. Layer 1's signal flow never uses models.
 
-Two CPU manifests ship: `data/manifests/cpu.json` for the eight-instruction
-Lab 5 subset and `data/manifests/cpu_new.json` for the 37-instruction RV32I
+Two built-in manifests: `data/manifests/cpu.json` for the eight-instruction
+CPU lab subset and `data/manifests/cpu_new.json` for the 37-instruction RV32I
 CPU. For RV32I the Coverage Coach runs the program through a small
 interpreter, follows branches and jumps, and splices extensions in front of
 the `jal x0, 0` halt loop.
@@ -255,7 +237,7 @@ Restart the app, or the server, after changing any of these.
 | To change… | Edit / set |
 |---|---|
 | Daily caps, per-machine budgets, whole-class breaker | A.2 |
-| Course token / admin token | server variables `DLC_COURSE_TOKEN`, `DLC_ADMIN_TOKEN`; Option B: the Secret `dlc-proxy-secrets` (B.1) |
+| Course token / admin token | server variables `DLC_COURSE_TOKEN`, `DLC_ADMIN_TOKEN`; the Secret `dlc-proxy-secrets`|
 | Where the server keeps its data | variable `DLC_PROXY_DB` (default `./dlc_proxy.db`; the container uses `/data/dlc_proxy.db` on its volume) |
 | Which model each Layer 3 mode uses | the picker on each Layer 3 board (Sonnet default or Opus, per run); the default comes from env `DLC_L3_DEBUG_MODEL` / `DLC_L3_PROPOSE_MODEL`, else `l3_debug_model` / `l3_propose_model` in `~/.dlc/config.json` |
 | LLM call timeout | env `DLC_LLM_TIMEOUT` (seconds, default 180) |
@@ -264,10 +246,9 @@ Restart the app, or the server, after changing any of these.
 | Files Mode A analyzes even when most rows fail | the `no_lazy_gate` list in that lab's manifest; the shipped CPU manifests list the control unit |
 | Official tests | Settings → Official tests (`~/.dlc/official_tests.json`); shipped defaults in `data/official_tests_defaults.json` |
 | The program a lab's instruction ROM must hold | the `runtime` entry in `data/official_tests_defaults.json` ([instructor_rom_config.md](instructor_rom_config.md)) |
-| Solution circuits that double-check Mode B proposals | env `DLC_REFERENCE_DIR` on your machine only; keep `reference_dir: null` in manifests |
 | The formula models themselves | `dlc/sim/models.py`, one function per known subcircuit |
 | Digital.jar location | first-run dialog, Settings, or env `DIGITAL_JAR` |
-| Release version | `version` in `pyproject.toml` (A.6) |
+| Release version | `version` in `pyproject.toml`|
 
 ### A.6 Build your own release zip
 
@@ -278,7 +259,6 @@ Restart the app, or the server, after changing any of these.
 4. GitHub → Releases → Draft a new release → the tag → attach the zip with
    exactly that filename → Publish. The README's Download button serves the
    latest release.
-5. Download it once and start it on a clean machine.
 
 ## Appendix B: Operating the course server
 
@@ -287,7 +267,7 @@ Restart the app, or the server, after changing any of these.
 1. Generate the new value (Step 2's command for a token) and update the card.
 2. Option B: Secrets → `dlc-proxy-secrets` → Actions → Edit Secret → change
    the value → Save; then Topology → Actions → **Restart rollout**. Option A:
-   stop the server with Ctrl+C and run the block from 3A again with the new
+   stop the server with Ctrl+C and run the block from step 3A again with the new
    value.
 3. A new course token is announced to students, who paste it under Settings →
    Course server. History and limits are untouched.
@@ -303,9 +283,7 @@ in the student zip instead.
 ### B.3 Pause, back up, resume
 
 Option B: Topology → circle → Details → the ↓ arrow sets the pod count to 0;
-↑ brings it back with everything in place. The CSV exports in Step 6 are the
-research copy of the data; the default storage class also snapshots the
-volume. Delete the project only after exporting. Option A: the data is the
+↑ brings it back with everything in place. Option A: the data is the
 one file named in `DLC_PROXY_DB`; copy it.
 
 ### B.4 Prove it works from a second device
@@ -328,7 +306,7 @@ must fail, which proves nobody reaches the AI without the real URL.
 - **Sleep.** A closed lid stops the server. macOS: `caffeinate -i uv run
   uvicorn …`; Windows: a power plan that never sleeps while plugged in.
 - **Off campus.** A LAN address works on that network only; students at home
-  get *can't be reached*.
+  get can't be reached.
 
 ### B.6 What breaks Option B
 
@@ -347,33 +325,3 @@ must fail, which proves nobody reaches the AI without the real URL.
   `/admin/view` on the end. The URL is the bare `https://…` host.
 - **No Dockerfile choice in Import Strategy.** The cluster forbids
   Dockerfile builds; ask its admins, or use Option A.
-
-### B.7 The same setup from the `oc` command line
-
-`proxy/openshift/dlc-proxy.yaml` creates the same objects as 3B. Set the
-`uri` in the file to your repository, then:
-
-```bash
-oc login …                                      # from the console's "Copy login command"
-oc project <project>
-oc create secret generic dlc-proxy-secrets \
-    --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
-    --from-literal=DLC_COURSE_TOKEN=course-... \
-    --from-literal=DLC_ADMIN_TOKEN=admin-...
-oc apply -f proxy/openshift/dlc-proxy.yaml
-oc start-build dlc-proxy --follow
-oc get route dlc-proxy                          # the hostname students paste
-```
-
-Do not apply the file on top of a deployment made through the console; the
-names collide.
-
-### B.8 Before the semester: checklist
-
-- [ ] Health URL shows the four flags `true` (Step 4).
-- [ ] Second-device test passed (B.4).
-- [ ] One AI feature ran end to end and the dashboard lists the machine.
-- [ ] The development API key was rotated and only the new one is in the
-      server (B.1).
-- [ ] Forks only: suite green on the tagged commit, zip published and started
-      on a clean machine (A.6).
