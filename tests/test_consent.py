@@ -1,5 +1,8 @@
+import io
 import json
+import re
 import time
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -154,8 +157,25 @@ def test_decision_reaches_the_proxy_and_decline_withdraws_events(cenv, monkeypat
     row = res["consents"][0]
     assert row["decision"] == "agreed" and row["has_signature"] is True
     assert "name" not in row and "signature" not in row      # not on the page
-    csv = pc.get("/admin/export.csv", headers=hdr, params={"table": "consents"}).text
-    assert "Ada Lovelace" in csv
+    r = pc.get("/admin/export.csv", headers=hdr, params={"table": "consents"})
+    assert r.headers["content-disposition"] == 'attachment; filename="consents.csv"'
+    lines = r.text.lstrip("\ufeff").strip().split("\n")
+    assert lines[0] == ("id,install_id,study_id,sheet_version,decision,name,"
+                        "signature_png,app_version,decided_at,received_at")
+    cells = lines[1].split(",")
+    assert cells[4:7] == ["agreed", "Ada Lovelace", "sig_1.png"]
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", cells[8])
+    assert "base64" not in r.text
+    # the drawing itself: a PNG per agreed row, plus an index
+    z = zipfile.ZipFile(io.BytesIO(pc.get("/admin/signatures.zip", headers=hdr).content))
+    assert sorted(z.namelist()) == ["index.csv", "sig_1.png"]
+    assert z.read("sig_1.png").startswith(b"\x89PNG")
+    assert "Ada Lovelace" in z.read("index.csv").decode("utf-8")
+    # the printable log carries the name and the signature inline
+    page = pc.get("/admin/consents.html", headers=hdr).text
+    assert "Ada Lovelace" in page and 'src="data:image/png;base64,' in page
+    assert pc.get("/admin/consents.html").status_code == 401
+    assert pc.get("/admin/signatures.zip").status_code == 401
     assert pc.get("/v1/health").json()["events"] >= 2
     out = consent.record("declined")
     assert out["synced"] is True
@@ -187,9 +207,11 @@ def test_survey_answers_are_counted_and_exported(cenv, monkeypatch):
     assert s["by_feature"] == {"modeA": 1, "modeB": 1}
     assert len(s["comments"]) == 1 and s["comments"][0]["comment"] == "show the row"
     csv = pc.get("/admin/export.csv", headers=hdr, params={"table": "surveys"}).text
-    lines = csv.strip().split("\n")
+    lines = csv.lstrip("\ufeff").strip().split("\n")
     assert lines[0] == "install_id,ts,feature,filename,helpful,answered,comment"
     assert len(lines) == 3 and "show the row" in csv
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", lines[1].split(",")[1])
+    assert lines[2].endswith(",modeB,,somewhat,no,")     # blank = not asked / not typed
 
 
 def test_consent_endpoint_is_token_gated_and_validates(cenv, monkeypatch):
