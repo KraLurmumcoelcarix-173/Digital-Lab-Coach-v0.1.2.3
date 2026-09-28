@@ -682,18 +682,19 @@
     });
   }
 
-  /* boot */
   document.addEventListener("DOMContentLoaded", function () {
     const btn = document.getElementById("tutor-help-btn");
     if (btn) btn.addEventListener("click", openHelp);
-    fetch("/api/tutorial/state")
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.seen === false) {
-          fetch("/api/tutorial/seen", { method: "POST" }).catch(function () {});
-          setTimeout(function () { start(0); }, 700);
-        }
-      })
-      .catch(function () {});
+    const gate = window.dlcFirstRun || Promise.resolve();
+    gate.then(function () {
+      return fetch("/api/tutorial/state")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.seen === false) {
+            fetch("/api/tutorial/seen", { method: "POST" }).catch(function () {});
+            setTimeout(function () { start(0); }, 700);
+          }
+        });
+    }).catch(function () {});
   });
 })();

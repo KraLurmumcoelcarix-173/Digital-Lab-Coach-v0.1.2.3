@@ -2738,6 +2738,9 @@ l2LlmBtn.addEventListener("click", async () => {
   }
   const payload = await res.json();
   logEvent("l2_llm_complete", { filename: file.filename, ok: payload.ok, gated: !!payload.gate_message });
+  if (payload.ok && !payload.gate_message && typeof dlcMaybeAskFeedback === "function") {
+    dlcMaybeAskFeedback("explain", file.filename);
+  }
 
   l2ForFile(file.filename, () => {
     if (!payload.ok) {

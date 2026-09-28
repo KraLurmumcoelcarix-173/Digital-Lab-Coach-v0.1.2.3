@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/style.css"/>
     <link rel="stylesheet" href="/static/l3.css"/>
     <link rel="stylesheet" href="/static/tutor.css"/>
+    <link rel="stylesheet" href="/static/consent.css"/>
     <script src="/static/i18n.js"></script>
     <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
@@ -423,6 +424,18 @@
             </div>
           </section>
 
+          <section class="settings-card" id="research-card">
+            <h3>Research participation</h3>
+            <p class="muted">When your course server runs a study, DLC asks
+              once whether your usage may be recorded for research. You can
+              change that answer here at any time; declining keeps every
+              feature working and records nothing.</p>
+            <div class="settings-row">
+              <span id="set-research-state" class="settings-code">checking…</span>
+              <button id="research-change-btn" class="btn-ghost hidden">Change…</button>
+            </div>
+          </section>
+
           <section class="settings-card">
             <h3>Official tests</h3>
             <p class="muted">Register the instructor-issued testcase for any
@@ -487,6 +500,7 @@
     <script src="/static/app.js"></script>
     <script src="/static/l3.js"></script>
     <script src="/static/settings.js"></script>
+    <script src="/static/consent.js"></script>
     <script src="/static/tutor.js"></script>
   </body>
 </html>
