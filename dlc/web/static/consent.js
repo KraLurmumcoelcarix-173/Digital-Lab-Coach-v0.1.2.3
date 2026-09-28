@@ -2,6 +2,7 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
 
 (function () {
   const SURVEY_MIN_GAP_MS = 20 * 60 * 1000;
+  const SURVEY_FIRST_GAP_MS = 60 * 1000;   // between the first-time questions of two features
   const SURVEY_MAX_PER_FEATURE = 2; // per browser session
   const SURVEY_TIMEOUT_MS = 3 * 60 * 1000;
   let studyState = null;
@@ -235,17 +236,31 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
       ["helpful", "Did the walkthrough help you see the problem?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]]] },
   };
 
+  // which features already asked once on this machine: {feature: time}
+  function surveySeen() {
+    try { return JSON.parse(localStorage.getItem("dlc_survey_seen") || "{}") || {}; } catch { return {}; }
+  }
+  function markSurveyShown(feature) {
+    const seen = surveySeen();
+    seen[feature] = Date.now();
+    try { localStorage.setItem("dlc_survey_seen", JSON.stringify(seen)); } catch {}
+    try { localStorage.setItem("dlc_survey_last", String(Date.now())); } catch {}
+  }
+
   function surveyAllowed(feature, force) {
     const q = QUESTIONS[feature];
     if (!q) return false;
     if (!studyState || !studyState.study_id || studyState.decision !== "agreed") return false;
     if (consentOpen || document.getElementById("dlc-survey")) return false;
     if (force) return true;
-    let seen = "";
-    try { seen = localStorage.getItem("dlc_survey_last") || ""; } catch {}
-    if (!seen) return true;
-    if ((surveyShown[feature] || 0) >= SURVEY_MAX_PER_FEATURE) return false;
+    const rate = Number(studyState.survey_rate || 0) * q.rate;
+    if (!(rate > 0)) return false;
     let last = 0; try { last = Number(localStorage.getItem("dlc_survey_last") || 0); } catch {}
+    // the first time each feature answers on this machine it always asks, at
+    // least a minute after any other question; from then on the survey rate,
+    // a 20-minute gap and a per-session cap decide
+    if (!surveySeen()[feature]) return Date.now() - last >= SURVEY_FIRST_GAP_MS;
+    if ((surveyShown[feature] || 0) >= SURVEY_MAX_PER_FEATURE) return false;
     if (Date.now() - last < SURVEY_MIN_GAP_MS) return false;
     return Math.random() < rate;
   }
@@ -254,7 +269,7 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
     if (!surveyAllowed(feature, !!force)) return;
     const q = QUESTIONS[feature];
     surveyShown[feature] = (surveyShown[feature] || 0) + 1;
-    try { localStorage.setItem("dlc_survey_last", String(Date.now())); } catch {}
+    markSurveyShown(feature);
     const answers = {};
     let step = 0, closed = false, timer = null;
     const box = el(`
@@ -275,10 +290,10 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
         log("feedback_survey", { feature, filename, helpful: answers.helpful || null,
                                  answered: answers.answered || null,
                                  comment: answers.comment || "", comment_len: (answers.comment || "").length });
-        flush();
       } else {
         log(reason === "timeout" ? "feedback_survey_timeout" : "feedback_survey_skipped", { feature, filename });
       }
+      flush();   // answered or skipped, it reaches the server right away
       if (answered && reason === "done") {
         box.innerHTML = `<h4>Thank you.</h4>`;
         setTimeout(() => box.remove(), 1000);

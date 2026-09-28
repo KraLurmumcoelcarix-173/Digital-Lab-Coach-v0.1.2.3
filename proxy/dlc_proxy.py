@@ -7,16 +7,21 @@ One small server the instructor user runs; students' tools point at it via
 
 from __future__ import annotations
 
+import base64
+import binascii
+import io
 import json
 import os
 import re
 import sqlite3
 import time
-from datetime import date, datetime
+import zipfile
+from datetime import date, datetime, timezone
+from html import escape as _h
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 
 from contextlib import asynccontextmanager
@@ -865,39 +870,193 @@ def admin_research(token: str | None = Query(default=None),
         conn.close()
 
 
-@app.get("/admin/export.csv", response_class=PlainTextResponse)
+# exports
+# Every export is a download (Content-Disposition), times are ISO UTC, and
+# the CSVs start with a BOM so Excel reads non-Latin names correctly.
+
+_TIME_COLS = {"ts", "client_ts", "stored_at", "received_at", "decided_at",
+              "last_seen"}
+
+_EXPORT_SQL = {
+    "events": "SELECT * FROM events ORDER BY id",
+    "machines": "SELECT * FROM machines ORDER BY first_seen",
+    "llm_calls": "SELECT * FROM llm_calls ORDER BY id",
+    # the drawn signature is not a CSV cell (Excel cuts cells at 32k
+    # characters): the column names the PNG inside signatures.zip instead
+    "consents": (
+        "SELECT id, install_id, study_id, version AS sheet_version, decision,"
+        " name, CASE WHEN signature IS NOT NULL AND signature != ''"
+        " THEN 'sig_' || id || '.png' ELSE '' END AS signature_png,"
+        " app_version, decided_at, received_at FROM consents ORDER BY id"),
+    "surveys": (
+        "SELECT install_id, COALESCE(client_ts, received_at) AS ts,"
+        " json_extract(props, '$.feature') AS feature,"
+        " json_extract(props, '$.filename') AS filename,"
+        " json_extract(props, '$.helpful') AS helpful,"
+        " json_extract(props, '$.answered') AS answered,"
+        " json_extract(props, '$.comment') AS comment"
+        " FROM events WHERE kind = 'feedback_survey' ORDER BY ts"),
+}
+
+
+def _iso_utc(v) -> str:
+    """Epoch seconds -> '2026-09-28T21:04:37Z'; anything else unchanged."""
+    if v is None or v == "":
+        return ""
+    try:
+        return datetime.fromtimestamp(float(v), tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return str(v)
+
+
+def _csv_cell(v) -> str:
+    s = "" if v is None else str(v)
+    if any(ch in s for ch in ',"\n'):
+        s = '"' + s.replace('"', '""') + '"'
+    return s
+
+
+def _csv_download(filename: str, lines: list[str]) -> Response:
+    body = "﻿" + "\n".join(lines) + "\n"
+    return Response(content=body.encode("utf-8"),
+                    media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{filename}"'})
+
+
+def _signature_png(data_url) -> bytes | None:
+    """The drawn signature as PNG bytes, or None unless the stored value is a
+    well-formed PNG data URL (nothing else is ever embedded in a page)."""
+    prefix = "data:image/png;base64,"
+    if not isinstance(data_url, str) or not data_url.startswith(prefix):
+        return None
+    try:
+        raw = base64.b64decode(data_url[len(prefix):], validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw if raw.startswith(b"\x89PNG\r\n\x1a\n") else None
+
+
+@app.get("/admin/export.csv")
 def export_csv(token: str | None = Query(default=None),
                x_dlc_admin_token: str | None = Header(default=None),
-               table: str = Query(default="events")) -> str:
+               table: str = Query(default="events")) -> Response:
     _check_admin(token, x_dlc_admin_token)
-    if table not in ("events", "machines", "llm_calls", "consents", "surveys"):
+    sql = _EXPORT_SQL.get(table)
+    if sql is None:
         raise HTTPException(status_code=400, detail="unknown table")
     conn = _db()
     try:
-        if table == "surveys":
-            cur = conn.execute(
-                "SELECT install_id, COALESCE(client_ts, received_at) AS ts,"
-                " json_extract(props, '$.feature') AS feature,"
-                " json_extract(props, '$.filename') AS filename,"
-                " json_extract(props, '$.helpful') AS helpful,"
-                " json_extract(props, '$.answered') AS answered,"
-                " json_extract(props, '$.comment') AS comment"
-                " FROM events WHERE kind = 'feedback_survey' ORDER BY ts")
-        else:
-            cur = conn.execute(f"SELECT * FROM {table}")
+        cur = conn.execute(sql)
         cols = [d[0] for d in cur.description]
         lines = [",".join(cols)]
         for row in cur:
-            cells = []
-            for v in row:
-                s = "" if v is None else str(v)
-                if any(ch in s for ch in ',"\n'):
-                    s = '"' + s.replace('"', '""') + '"'
-                cells.append(s)
-            lines.append(",".join(cells))
-        return "\n".join(lines) + "\n"
+            lines.append(",".join(
+                _csv_cell(_iso_utc(v) if col in _TIME_COLS else v)
+                for col, v in zip(cols, row)))
+        return _csv_download(f"{table}.csv", lines)
     finally:
         conn.close()
+
+
+@app.get("/admin/signatures.zip")
+def admin_signatures_zip(token: str | None = Query(default=None),
+                         x_dlc_admin_token: str | None = Header(default=None)
+                         ) -> Response:
+    """Every drawn signature as sig_<id>.png (the names consents.csv uses)
+    plus index.csv: id, install_id, name, decided_at, file."""
+    _check_admin(token, x_dlc_admin_token)
+    buf = io.BytesIO()
+    index = ["id,install_id,name,decided_at,file"]
+    conn = _db()
+    try:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for cid, iid, name, sig, dat in conn.execute(
+                    "SELECT id, install_id, name, signature, decided_at"
+                    " FROM consents WHERE signature IS NOT NULL"
+                    " AND signature != '' ORDER BY id"):
+                png = _signature_png(sig)
+                if png is None:
+                    continue
+                fn = f"sig_{cid}.png"
+                zf.writestr(fn, png)
+                index.append(",".join(_csv_cell(x) for x in
+                                      (cid, iid, name, _iso_utc(dat), fn)))
+            zf.writestr("index.csv", "﻿" + "\n".join(index) + "\n")
+    finally:
+        conn.close()
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition":
+                             'attachment; filename="signatures.zip"'})
+
+
+_CONSENT_LOG_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Consent log — study __STUDY__</title>
+<style>
+ body{font:13px/1.45 system-ui,sans-serif;margin:24px;color:#111827}
+ h1{font-size:18px;margin:0 0 4px}
+ .muted{color:#6b7280}
+ table{border-collapse:collapse;width:100%;margin-top:14px}
+ th,td{border:1px solid #d1d5db;padding:6px 8px;text-align:left;
+       vertical-align:middle;font-size:12.5px}
+ th{background:#f3f4f6}
+ img{height:60px;max-width:220px;background:#fff;display:block}
+ code{font-size:12px}
+ button{padding:6px 14px;margin-top:10px;cursor:pointer}
+ @media print{button{display:none} body{margin:0}}
+</style></head><body>
+<h1>Digital Lab Coach — consent log, study __STUDY__</h1>
+<div class="muted">__N__ decisions: __AGREED__ agreed, __DECLINED__ declined
+ · generated __GENERATED__ (UTC) · every decision the course server received,
+ oldest first; signatures as drawn in the tool</div>
+<button onclick="window.print()">Print / save as PDF</button>
+<table><thead><tr><th>#</th><th>decided (UTC)</th><th>decision</th>
+<th>typed name</th><th>machine</th><th>sheet</th><th>app</th><th>signature</th>
+</tr></thead><tbody>
+__ROWS__
+</tbody></table></body></html>"""
+
+
+@app.get("/admin/consents.html", response_class=HTMLResponse)
+def admin_consent_log(token: str | None = Query(default=None),
+                      x_dlc_admin_token: str | None = Header(default=None)
+                      ) -> str:
+    """A printable consent log for the study records: every decision with
+    the typed name and the drawn signature inline. Print it to PDF."""
+    _check_admin(token, x_dlc_admin_token)
+    conn = _db()
+    try:
+        rows = conn.execute(
+            "SELECT id, install_id, version, decision, name, signature,"
+            " app_version, decided_at, received_at FROM consents"
+            " ORDER BY COALESCE(decided_at, received_at), id").fetchall()
+    finally:
+        conn.close()
+    trs = []
+    for cid, iid, ver, dec, name, sig, appv, dat, rec in rows:
+        png = _signature_png(sig)
+        if png is not None:
+            img = ('<img alt="signature" src="data:image/png;base64,'
+                   + base64.b64encode(png).decode("ascii") + '">')
+        else:
+            img = '<span class="muted">typed only</span>' if dec == "agreed" else ""
+        cells = (str(cid), _h(_iso_utc(dat if dat is not None else rec)),
+                 _h(dec or ""), _h(name or ""),
+                 f"<code>{_h((iid or '')[:8])}</code>", _h(ver or ""),
+                 _h(appv or ""), img)
+        trs.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+    page = _CONSENT_LOG_PAGE
+    for key, val in (("__STUDY__", _h(_study_id() or "none")),
+                     ("__N__", str(len(rows))),
+                     ("__AGREED__", str(sum(1 for r in rows if r[3] == "agreed"))),
+                     ("__DECLINED__", str(sum(1 for r in rows if r[3] == "declined"))),
+                     ("__GENERATED__", _iso_utc(time.time())),
+                     ("__ROWS__", "\n".join(trs) or
+                      '<tr><td colspan="8" class="muted">no decisions recorded yet</td></tr>')):
+        page = page.replace(key, val)
+    return page
 
 
 _ADMIN_PAGE = """<!doctype html>
@@ -975,6 +1134,10 @@ _ADMIN_PAGE = """<!doctype html>
  .aihead{font-size:12px;color:#6b7280;margin-bottom:2px}
  .pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:10px;
        padding:1px 8px;font-size:11.5px;margin-right:6px}
+ .xbtns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+ .xbtns button{padding:6px 14px;border:1px solid #d1d5db;background:#fff;
+               border-radius:6px;cursor:pointer;font-weight:600;color:#374151}
+ .xbtns button:hover{background:#f3f4f6}
 </style></head><body>
 <header><h1>Digital Lab Coach — course dashboard</h1>
 <button class="ghost" id="logout" style="display:none">forget token</button>
@@ -1051,14 +1214,20 @@ _ADMIN_PAGE = """<!doctype html>
    <section id="sec-research" style="display:none">
      <div class="tiles" id="rs-tiles"></div>
      <div class="cardbox"><h2 style="margin-top:0">Feedback survey
-       <span class="muted" style="font-weight:normal">— asked at random after a coach answer, consenting students only</span></h2>
+       <span class="muted" style="font-weight:normal">— consenting students only; each feature asks once the first time it answers, then at random</span></h2>
        <div class="tiles" id="rs-survey" style="margin-bottom:8px"></div>
        <div id="rs-comments"></div></div>
      <div class="cardbox"><h2 style="margin-top:0">Consent decisions
-       <span class="muted" style="font-weight:normal">— latest per machine; typed names and signatures are only in the CSV export</span></h2>
+       <span class="muted" style="font-weight:normal">— latest per machine; typed names and signatures are only in the downloads below</span></h2>
        <div id="rs-consents"></div>
-       <p class="muted">Exports: <a id="rs-x-consents" href="#">consents.csv</a> ·
-         <a id="rs-x-surveys" href="#">surveys.csv</a></p></div>
+       <div class="xbtns">
+         <button id="rs-x-consents">&#11015; consents.csv</button>
+         <button id="rs-x-sigs">&#11015; signatures.zip</button>
+         <button id="rs-x-log">consent log (print / PDF)</button>
+         <button id="rs-x-surveys">&#11015; surveys.csv</button>
+       </div>
+       <p class="muted" style="margin:8px 0 0">consents.csv: every decision with the typed name; its <code>signature_png</code> column names the drawing inside signatures.zip.
+         The consent log shows the same rows with the signatures inline, ready to print. surveys.csv: one row per answered survey; blank cells mean that question was not part of it. All times are UTC.</p></div>
    </section>
  </div>
 </main>
@@ -1417,8 +1586,18 @@ async function loadResearch(){
         sheet:esc(r.version||""),signature:r.has_signature?"drawn":"typed only",app:esc(r.app_version||"")})),
         ["machine","decision","when","sheet","signature","app"])
     :`<p class="muted">no decisions recorded yet</p>`;
-  $("rs-x-consents").href="/admin/export.csv?table=consents&token="+encodeURIComponent(tok());
-  $("rs-x-surveys").href="/admin/export.csv?table=surveys&token="+encodeURIComponent(tok());
+  $("rs-x-consents").onclick=()=>download("/admin/export.csv?table=consents","consents.csv");
+  $("rs-x-surveys").onclick=()=>download("/admin/export.csv?table=surveys","surveys.csv");
+  $("rs-x-sigs").onclick=()=>download("/admin/signatures.zip","signatures.zip");
+  $("rs-x-log").onclick=()=>window.open("/admin/consents.html?token="+encodeURIComponent(tok()),"_blank");
+}
+async function download(path,filename){
+  const r=await fetch(path,{headers:{"X-DLC-Admin-Token":tok()}});
+  if(!r.ok){alert("download failed: HTTP "+r.status);return}
+  const u=URL.createObjectURL(await r.blob());
+  const a=document.createElement("a");a.href=u;a.download=filename;
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u),10000);
 }
 function showTab(t){
   state.tab=t;
