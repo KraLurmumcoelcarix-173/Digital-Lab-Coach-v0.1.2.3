@@ -1,4 +1,4 @@
-# Instructor Guide: set up DLC for a course (Last updated: 9/27/26)
+# Instructor Guide: set up DLC for a course (Last updated: 9/28/26)
 
 Everything optional, such as forking DLC for another course, changing limits or
 lab manifests, sits in [Appendix A](#appendix-a-optional-setup-fork-and-adapt).
@@ -47,7 +47,9 @@ Do **3B** or **3A**, not both.
 
 [Carolina CloudApps](https://cloudapps.unc.edu) is UNC's OpenShift cluster,
 free to UNC affiliates. Open `console.apps.cloudapps.unc.edu`, Developer
-view, and create a project if you have none. Its name is `<project>` below.
+view. You have exactly one project, named after your Onyen; it is
+`<project>` below. **Never delete it**: users cannot create projects, and
+only ITS can restore one (a ticket to CloudApps support).
 
 **3B.1 The Secret.** Left menu **Secrets** → **Create** → **Key/value
 secret**. Name `dlc-proxy-secrets`, then add three kv pairs from note:
@@ -65,7 +67,7 @@ bottom, then **Create**:
 | Application name / Name | `dlc` / `dlc-proxy` |
 | Build option | BuildConfig, advanced options untouched, its environment variables empty |
 | Resource type | Deployment |
-| Advanced Deployment option → Environment variables | **Add from ConfigMap or Secret** three times: Name `ANTHROPIC_API_KEY` from `dlc-proxy-secrets` key `ANTHROPIC_API_KEY`, the same for `DLC_COURSE_TOKEN` and `DLC_ADMIN_TOKEN` |
+| Advanced Deployment option → Environment variables | **Add from ConfigMap or Secret** three times: Name `ANTHROPIC_API_KEY` from `dlc-proxy-secrets` key `ANTHROPIC_API_KEY`, the same for `DLC_COURSE_TOKEN` and `DLC_ADMIN_TOKEN`; then **Add value** once: Name `DLC_STUDY_ID`, Value your IRB number, e.g. `26-2770` (leave it out while no study runs; see B.7) |
 | Target port | `8080` |
 | Create a route | ticked; advanced Routing: **Secure Route**, TLS termination **Edge**, Insecure traffic **Redirect**, everything else empty |
 
@@ -99,10 +101,11 @@ set ANTHROPIC_API_KEY=sk-ant-...
 set DLC_COURSE_TOKEN=course-...
 set DLC_ADMIN_TOKEN=admin-...
 set DLC_PROXY_DB=C:\dlc-proxy\dlc_proxy.db
+set DLC_STUDY_ID=26-2770
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
 
-**Windows, PowerShell**
+**Windows, PowerShell** (here `set X=Y` does nothing; use these lines)
 
 ```powershell
 cd C:\path\to\DLC
@@ -110,6 +113,7 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 $env:DLC_COURSE_TOKEN = "course-..."
 $env:DLC_ADMIN_TOKEN = "admin-..."
 $env:DLC_PROXY_DB = "C:\dlc-proxy\dlc_proxy.db"
+$env:DLC_STUDY_ID = "26-2770"
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
 
@@ -121,8 +125,14 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export DLC_COURSE_TOKEN=course-...
 export DLC_ADMIN_TOKEN=admin-...
 export DLC_PROXY_DB=$HOME/dlc-proxy/dlc_proxy.db
+export DLC_STUDY_ID=26-2770
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
+
+`DLC_STUDY_ID` switches on the consent sheet and the feedback survey (B.7).
+Leave that line out while no study runs. `DLC_SURVEY_RATE` (default `0.35`)
+is the chance that a survey follows a coach answer; set it to `1` when you
+test.
 
 A clean start prints no `WARNING:` line. Then find the laptop's address on
 the network: Windows `ipconfig` (the IPv4 Address of the connected adapter),
@@ -140,6 +150,10 @@ read `true`:
 | `admin_token_set` | the dashboard rejects every admin token |
 | `key_configured` | students see "the course server has no API key configured" |
 | `key_format_ok` | the key was pasted wrong |
+
+`study_id` shows the IRB number when a study is on, `null` otherwise. With
+`null` no student is ever asked for consent and no usage data ever leaves a
+machine.
 
 Option B: a `false` means an environment row in 3B.2 is missing or misnamed.
 Option A: a `false` means a `set` or `export` line was skipped; fix it and
@@ -241,6 +255,8 @@ Restart the app, or the server, after changing any of these.
 | Where the server keeps its data | variable `DLC_PROXY_DB` (default `./dlc_proxy.db`; the container uses `/data/dlc_proxy.db` on its volume) |
 | Which model each Layer 3 mode uses | the picker on each Layer 3 board (Sonnet default or Opus, per run); the default comes from env `DLC_L3_DEBUG_MODEL` / `DLC_L3_PROPOSE_MODEL`, else `l3_debug_model` / `l3_propose_model` in `~/.dlc/config.json` |
 | LLM call timeout | env `DLC_LLM_TIMEOUT` (seconds, default 180) |
+| The research study on or off | env `DLC_STUDY_ID` on the server (the IRB number; unset = no study)|
+| How often the feedback survey asks | env `DLC_SURVEY_RATE` on the server (0–1, default `0.35` in `_survey_rate()` in `proxy/dlc_proxy.py`); the first-time rule, the 20-minute gap, the 2-per-session cap and the half rate for Layer 1 and the walkthrough are the constants at the top of `dlc/web/static/consent.js` |
 | Lecture list Layer 2 cites | `SYLLABUS_311` in `dlc/llm/explain.py` (A.3) |
 | Lab categories, subcircuit roles and formula models, program decode | one manifest per lab in `data/manifests/` ([MANIFEST_GUIDE.md](MANIFEST_GUIDE.md)) |
 | Files Mode A analyzes even when most rows fail | the `no_lazy_gate` list in that lab's manifest; the shipped CPU manifests list the control unit |
@@ -325,3 +341,6 @@ must fail, which proves nobody reaches the AI without the real URL.
   `/admin/view` on the end. The URL is the bare `https://…` host.
 - **No Dockerfile choice in Import Strategy.** The cluster forbids
   Dockerfile builds; ask its admins, or use Option A.
+- **The project is gone.** Deleting the project deletes the server, the
+  Secret, the volume and the data, and you cannot create a new one. Ask
+  CloudApps support to restore it, then do 3B.1 to 3B.4 again.

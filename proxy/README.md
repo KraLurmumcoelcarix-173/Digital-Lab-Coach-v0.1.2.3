@@ -39,10 +39,13 @@ Two ways, both in the instructor guide
 | `DLC_COURSE_TOKEN` | what students paste. Unset, the proxy refuses every `/v1/llm` and `/v1/events` request (503) |
 | `DLC_ADMIN_TOKEN` | opens `/admin/*`. Unset, every admin request is refused |
 | `DLC_PROXY_DB` | the SQLite ledger (default `./dlc_proxy.db`; the container sets `/data/dlc_proxy.db`); keep it outside the repo |
+| `DLC_STUDY_ID` | the IRB study number, e.g. `26-2770`. Set, the tool shows the consent sheet once per machine and events ship only from machines that agreed; unset, nobody is asked and nothing ships |
+| `DLC_SURVEY_RATE` | chance (0–1, default `0.35`) that a one-question feedback survey follows a coach answer on an agreed machine, after each feature's first time; `1` for testing |
 
 `GET /v1/health` reports `course_token_set`, `admin_token_set`,
 `key_configured` and `key_format_ok`; all four must read `true` before
-class. Students paste the course server URL -
+class. It also carries `study_id` and `survey_rate`, which the tool reads to
+decide whether to ask for consent. Students paste the course server URL -
 `http://<proxy machine's LAN address>:8321` under Option A,
 `https://dlc-proxy-<project>.apps.cloudapps.unc.edu` under Option B - plus
 the course token under Settings → Course server; the tool stores them in
@@ -54,9 +57,12 @@ the course token under Settings → Course server; the tool stores them in
 |---|---|
 | `POST /v1/llm` | LLM relay (course-token gated): checks the machine's daily budget, attaches your key, forwards through the same client wrapper the tool uses, logs usage. With no key on the proxy it answers "no API key configured — tell your instructor" and spends nothing. |
 | `POST /v1/events` | Telemetry batch ingest, deduped on (machine, row id); stamps each machine's authoritative first-seen date. |
-| `GET /v1/health` | Liveness, counts, and the four configuration flags above. |
-| `GET /admin/view` | The dashboard; asks for the admin token once. Its JSON feeds are `/admin/summary`, `/admin/daily`, `/admin/events`, `/admin/llm_texts`, `/admin/stats` (`?token=…` or header `X-DLC-Admin-Token`). |
-| `GET /admin/export.csv?token=…&table=events\|machines\|llm_calls` | Raw CSVs for the evaluation pipeline. |
+| `POST /v1/consent` | Stores a machine's consent decision: install id, sheet version, agreed or declined, typed name, drawn signature. A declined decision deletes that machine's events. |
+| `GET /v1/health` | Liveness, counts, the four configuration flags above, `study_id` and `survey_rate`. |
+| `GET /admin/view` | The dashboard; asks for the admin token once. Its JSON feeds are `/admin/summary`, `/admin/daily`, `/admin/events`, `/admin/llm_texts`, `/admin/stats`, `/admin/research` (`?token=…` or header `X-DLC-Admin-Token`). |
+| `GET /admin/export.csv?token=…&table=events\|machines\|llm_calls\|consents\|surveys` | CSV downloads for the evaluation pipeline; times are ISO UTC, names appear in `consents` only. |
+| `GET /admin/signatures.zip` | Every drawn signature as `sig_<id>.png`, the names `consents.csv` refers to, plus `index.csv`. |
+| `GET /admin/consents.html` | A printable consent log: every decision with the typed name and the signature inline. |
 
 ## Notes
 
