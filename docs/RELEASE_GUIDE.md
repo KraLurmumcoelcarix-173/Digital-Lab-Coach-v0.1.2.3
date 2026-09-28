@@ -67,7 +67,7 @@ bottom, then **Create**:
 | Application name / Name | `dlc` / `dlc-proxy` |
 | Build option | BuildConfig, advanced options untouched, its environment variables empty |
 | Resource type | Deployment |
-| Advanced Deployment option → Environment variables | **Add from ConfigMap or Secret** three times: Name `ANTHROPIC_API_KEY` from `dlc-proxy-secrets` key `ANTHROPIC_API_KEY`, the same for `DLC_COURSE_TOKEN` and `DLC_ADMIN_TOKEN`; then **Add value** once: Name `DLC_STUDY_ID`, Value your IRB number, e.g. `26-2770` (leave it out while no study runs; see B.7) |
+| Advanced Deployment option → Environment variables | **Add from ConfigMap or Secret** three times: Name `ANTHROPIC_API_KEY` from `dlc-proxy-secrets` key `ANTHROPIC_API_KEY`, the same for `DLC_COURSE_TOKEN` and `DLC_ADMIN_TOKEN`; then **Add value** twice: Name `DLC_STUDY_ID`, Value your IRB number, e.g. `26-2770`; Name `DLC_SURVEY_RATE`, Value `0.35` (leave both out while no study runs) |
 | Target port | `8080` |
 | Create a route | ticked; advanced Routing: **Secure Route**, TLS termination **Edge**, Insecure traffic **Redirect**, everything else empty |
 
@@ -102,6 +102,7 @@ set DLC_COURSE_TOKEN=course-...
 set DLC_ADMIN_TOKEN=admin-...
 set DLC_PROXY_DB=C:\dlc-proxy\dlc_proxy.db
 set DLC_STUDY_ID=26-2770
+set DLC_SURVEY_RATE=0.35
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
 
@@ -114,6 +115,7 @@ $env:DLC_COURSE_TOKEN = "course-..."
 $env:DLC_ADMIN_TOKEN = "admin-..."
 $env:DLC_PROXY_DB = "C:\dlc-proxy\dlc_proxy.db"
 $env:DLC_STUDY_ID = "26-2770"
+$env:DLC_SURVEY_RATE = "0.35"
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
 
@@ -126,13 +128,13 @@ export DLC_COURSE_TOKEN=course-...
 export DLC_ADMIN_TOKEN=admin-...
 export DLC_PROXY_DB=$HOME/dlc-proxy/dlc_proxy.db
 export DLC_STUDY_ID=26-2770
+export DLC_SURVEY_RATE=0.35
 uv run uvicorn proxy.dlc_proxy:app --host 0.0.0.0 --port 8321
 ```
 
-`DLC_STUDY_ID` switches on the consent sheet and the feedback survey (B.7).
-Leave that line out while no study runs. `DLC_SURVEY_RATE` (default `0.35`)
-is the chance that a survey follows a coach answer; set it to `1` when you
-test.
+`DLC_STUDY_ID` switches on the consent sheet and the feedback survey.
+Leave that line out while no study runs. `DLC_SURVEY_RATE` is the chance that a survey follows a coach answer
+(`0.35` above is the default; `1` when you test, `0` for no surveys).
 
 A clean start prints no `WARNING:` line. Then find the laptop's address on
 the network: Windows `ipconfig` (the IPv4 Address of the connected adapter),
