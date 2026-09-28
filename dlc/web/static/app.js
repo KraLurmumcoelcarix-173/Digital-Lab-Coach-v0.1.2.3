@@ -565,6 +565,12 @@ async function postAll() {
     });
     if (f.reupload) logEvent("reupload_diff", { filename: f.filename, ...f.reupload });
   }
+  {
+    const withErrors = loaded.find((f) => (f.issues || []).some((i) => i.severity === "error"));
+    if (withErrors && typeof dlcMaybeAskFeedback === "function") {
+      dlcMaybeAskFeedback("l1", withErrors.filename);
+    }
+  }
   l3ExpireAll("re-upload");   // hypothesis cards die on re-upload (l3.debug.v1.1 §7)
   l2ForgetAll();
   if (loaded.length === 0) {
@@ -3125,6 +3131,9 @@ async function l2PlayWalkthrough() {
   if (!cy) return;
   logEvent("l2_walkthrough_played", { filename: file.filename, waves: walk.waves });
   l2WalkStart();
+  if (typeof dlcMaybeAskFeedback === "function") {
+    setTimeout(() => dlcMaybeAskFeedback("walkthrough", file.filename), 20000);
+  }
 }
 
 function l2WalkStart() {

@@ -2,8 +2,6 @@
 
 **IRB Study #:** 26-2770
 **Study Title:** COMP311: Digital Lab Coach Tool Evaluation
-**Principal Investigator:** <<PI name>>
-**PI Phone Number:** <<PI phone>>
 
 The purpose of this research study is to understand how students use the
 Digital Lab Coach while debugging digital circuit labs, and whether its

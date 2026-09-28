@@ -7,6 +7,9 @@ telemetry leave the machine. A declined decision stops local recording as
 well and purges whatever was spooled but never shipped. A new version of
 the consent text asks again.
 
+The decision is made once, on the first start after connecting; the app
+offers no switch afterwards (withdrawal goes through the research team).
+
 Files (all under ~/.dlc unless an env var points elsewhere):
     consent.json   the decision: study id, text version, agreed/declined,
                    typed name, optional drawn signature, sync flag
@@ -22,7 +25,7 @@ import time
 from pathlib import Path
 
 _APP_ROOT = Path(__file__).resolve().parent.parent.parent
-_STUDY_TTL = 600.0 # seconds before the study cache is refreshed
+_STUDY_TTL = 600.0            # seconds before the study cache is refreshed
 
 
 def state_path() -> Path:
@@ -134,16 +137,17 @@ def study_active(refresh: bool = False) -> bool:
 # gating
 
 def telemetry_allowed() -> bool:
-    return not (decision() == "declined" and study_active())
+    """Local recording. Off once the student declined."""
+    return decision() != "declined"
 
 
 def shipping_allowed() -> bool:
-    if not study_active():
-        return True
     return decision() == "agreed"
 
 
 def consent_required() -> bool:
+    """Ask (again) when a study is on and no decision exists for the
+    current sheet version."""
     if not study_active():
         return False
     st = load_state()
@@ -155,6 +159,7 @@ def consent_required() -> bool:
 # decision
 
 def _purge_unshipped() -> int:
+    """Drop spooled events that never left the machine."""
     try:
         from dlc.telemetry import sink
         if not sink.db_path().exists():
@@ -177,6 +182,7 @@ def _purge_unshipped() -> int:
 
 
 def record(decision_value: str, name: str = "", signature: str | None = None) -> dict:
+    """Store the student's decision and try to send it to the course server."""
     if decision_value not in ("agreed", "declined"):
         raise ValueError("decision must be 'agreed' or 'declined'")
     name = (name or "").strip()[:120]
@@ -196,7 +202,7 @@ def record(decision_value: str, name: str = "", signature: str | None = None) ->
         "synced": False,
     }
     _write_json(state_path(), st)
-    purged = _purge_unshipped() if decision_value == "declined" else 0
+    purged = _purge_unshipped()
     synced = sync_pending().get("synced", False)
     return {"ok": True, "decision": decision_value, "version": st["version"],
             "purged": purged, "synced": synced}

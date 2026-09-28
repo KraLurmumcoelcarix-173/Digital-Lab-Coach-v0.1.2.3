@@ -1,9 +1,11 @@
 window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resolve; });
 
 (function () {
-  const SURVEY_MIN_GAP_MS = 20 * 60 * 1000;   // between two prompts
-  const SURVEY_MAX_PER_FEATURE = 2;           // per browser session
+  const SURVEY_MIN_GAP_MS = 20 * 60 * 1000;
+  const SURVEY_MAX_PER_FEATURE = 2; // per browser session
+  const SURVEY_TIMEOUT_MS = 3 * 60 * 1000;
   let studyState = null;
+  let consentOpen = false;
   const surveyShown = {};
 
   function esc(s) { return typeof escapeHtml === "function" ? escapeHtml(String(s)) : String(s); }
@@ -32,9 +34,9 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
     let pr = null;
     try { pr = await getJson("/api/config/proxy"); } catch { return; }
     if (!pr || pr.configured) return;
-    let skipped = false;
-    try { skipped = localStorage.getItem("dlc_connect_asked") === "1"; } catch {}
-    if (skipped) return;
+    let asked = false;
+    try { asked = localStorage.getItem("dlc_connect_asked") === "1"; } catch {}
+    if (asked) return;
     return new Promise((resolve) => {
       const gate = el(`
         <div class="dlc-gate" id="dlc-connect-gate" role="dialog" aria-modal="true">
@@ -97,13 +99,14 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
   }
 
   function showConsentModal(st, md) {
+    consentOpen = true;
     return new Promise((resolve) => {
       const gate = el(`
         <div class="dlc-gate" id="dlc-consent-gate" role="dialog" aria-modal="true" data-i18n-skip>
           <div class="dlc-gate-card">
             <h3>Research participation</h3>
             <p class="muted">Please read the information sheet. Taking part is voluntary; every feature of
-              DLC works either way.</p>
+              DLC works either way. You decide once.</p>
             <div class="dlc-consent-doc" id="dlc-consent-doc">${renderMd(md)}</div>
             <div class="dlc-consent-form">
               <label for="dlc-consent-name">Type your full name (this is your electronic signature)</label>
@@ -132,7 +135,6 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
       const msg = gate.querySelector("#dlc-consent-msg");
       const pad = signaturePad(gate.querySelector("#dlc-consent-sig"));
       gate.querySelector("#dlc-sig-clear").addEventListener("click", () => pad.clear());
-      if (st && st.name) name.value = st.name;
       const update = () => { yes.disabled = !(box.checked && name.value.trim().length >= 2); };
       name.addEventListener("input", update); box.addEventListener("change", update);
       log("consent_shown", { version: st && st.version, study_id: st && st.study_id });
@@ -149,127 +151,172 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
         studyState = r.body.state || studyState;
         if (decision === "agreed") { log("consent_agreed", { version: r.body.version }); flush(); }
         gate.remove();
+        consentOpen = false;
         renderResearchCard();
         resolve(decision);
       };
       yes.addEventListener("click", () => send("agreed"));
       gate.querySelector("#dlc-consent-decline").addEventListener("click", () => {
-        if (!confirm("Decline the research study? DLC keeps working with every feature; nothing about your use is recorded. You can change this later in Settings → Research participation.")) return;
+        if (!confirm("Decline the research study? DLC keeps working with every feature and records nothing about your use. This answer is final in the tool.")) return;
         send("declined");
       });
     });
   }
 
-  async function consentGate(force) {
+  async function consentGate() {
+    if (consentOpen || document.getElementById("dlc-consent-gate")) return;
     let st = null;
     try { st = await getJson("/api/consent/state?refresh=1"); } catch { return; }
     studyState = st;
-    if (!st || (!st.required && !force)) return;
-    if (!st.study_id) return;
+    if (!st || !st.required || !st.study_id) return;
     let md = "";
     try { md = await (await fetch("/api/consent/text")).text(); } catch {}
     if (!md.trim()) return;
     return showConsentModal(st, md);
   }
 
+  function watchSettingsSave() {
+    const btn = document.getElementById("proxy-save-btn");
+    if (!btn) return;
+    btn.addEventListener("click", () => {
+      let tries = 0;
+      const tick = async () => {
+        tries += 1;
+        let pr = null;
+        try { pr = await getJson("/api/config/proxy"); } catch {}
+        if (pr && pr.configured) { await consentGate(); renderResearchCard(); return; }
+        if (tries < 8) setTimeout(tick, 800);
+      };
+      setTimeout(tick, 900);
+    });
+  }
+
   /* ------------------------------------------------ 3. settings card */
   async function renderResearchCard() {
     const state = document.getElementById("set-research-state");
-    const btn = document.getElementById("research-change-btn");
     if (!state) return;
     let st = studyState;
     try { st = await getJson("/api/consent/state"); studyState = st; } catch {}
     if (!st || !st.study_id) {
       state.textContent = "no study on this course server — nothing is asked";
       state.classList.remove("settings-bad");
-      if (btn) btn.classList.add("hidden");
       return;
     }
     const when = st.decided_at ? new Date(st.decided_at * 1000).toLocaleDateString() : "";
     if (st.decision === "agreed") {
-      state.textContent = `taking part (study ${st.study_id})${st.name ? ", signed " + st.name : ""}${when ? ", " + when : ""}${st.required ? " — the sheet changed, please review" : ""}`;
-      state.classList.toggle("settings-bad", !!st.required);
+      state.textContent = `taking part in study ${st.study_id}${st.name ? ", signed " + st.name : ""}${when ? ", " + when : ""}`;
+      state.classList.remove("settings-bad");
     } else if (st.decision === "declined") {
       state.textContent = `declined${when ? " on " + when : ""} — nothing is recorded`;
       state.classList.remove("settings-bad");
     } else {
-      state.textContent = `study ${st.study_id} is on — not answered yet`;
+      state.textContent = `study ${st.study_id} is on — the sheet appears on the next start`;
       state.classList.add("settings-bad");
-    }
-    if (btn) {
-      btn.classList.remove("hidden");
-      btn.textContent = st.decision ? "Change…" : "Answer…";
     }
   }
 
   /* ----------------------------------------------- 4. feedback survey */
-  function surveyAllowed(feature) {
+  // One question at a time, one click each. The features with a full
+  // answer (coach output) get two questions; Layer 1 cards and the
+  // walkthrough get one. An optional comment box closes every path.
+  const QUESTIONS = {
+    modeA: { intro: "the Mode A fix analysis", rate: 1, steps: [
+      ["helpful", "Was this feedback helpful?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]],
+      ["answered", "Did it answer your question or help you identify the problem?", [["yes", "Yes"], ["partially", "Partially"], ["no", "No"]]]] },
+    modeB: { intro: "the Coverage Coach proposals", rate: 1, steps: [
+      ["helpful", "Was this feedback helpful?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]],
+      ["answered", "Did it answer your question or help you identify the problem?", [["yes", "Yes"], ["partially", "Partially"], ["no", "No"]]]] },
+    explain: { intro: "the Layer 2 summary", rate: 1, steps: [
+      ["helpful", "Was this feedback helpful?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]],
+      ["answered", "Did it answer your question or help you identify the problem?", [["yes", "Yes"], ["partially", "Partially"], ["no", "No"]]]] },
+    l1: { intro: "the issue cards", rate: 0.5, steps: [
+      ["helpful", "Did the issue cards point you to the right place?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]]] },
+    walkthrough: { intro: "the signal-flow walkthrough", rate: 0.5, steps: [
+      ["helpful", "Did the walkthrough help you see the problem?", [["yes", "Yes"], ["somewhat", "Somewhat"], ["no", "No"]]]] },
+  };
+
+  function surveyAllowed(feature, force) {
+    const q = QUESTIONS[feature];
+    if (!q) return false;
     if (!studyState || !studyState.study_id || studyState.decision !== "agreed") return false;
-    const rate = Number(studyState.survey_rate || 0);
+    if (consentOpen || document.getElementById("dlc-survey")) return false;
+    if (force) return true;
+    const rate = Number(studyState.survey_rate || 0) * q.rate;
     if (!(rate > 0)) return false;
     if ((surveyShown[feature] || 0) >= SURVEY_MAX_PER_FEATURE) return false;
-    if (document.getElementById("dlc-survey")) return false;
     let last = 0; try { last = Number(localStorage.getItem("dlc_survey_last") || 0); } catch {}
     if (Date.now() - last < SURVEY_MIN_GAP_MS) return false;
     return Math.random() < rate;
   }
 
-  const FEATURE_LABEL = { modeA: "the Mode A fix analysis", modeB: "the Coverage Coach proposals", explain: "the Layer 2 summary" };
-
-  window.dlcMaybeAskFeedback = function (feature, filename) {
-    if (!surveyAllowed(feature)) return;
+  window.dlcMaybeAskFeedback = function (feature, filename, force) {
+    if (!surveyAllowed(feature, !!force)) return;
+    const q = QUESTIONS[feature];
     surveyShown[feature] = (surveyShown[feature] || 0) + 1;
     try { localStorage.setItem("dlc_survey_last", String(Date.now())); } catch {}
+    const answers = {};
+    let step = 0, closed = false, timer = null;
     const box = el(`
       <div class="dlc-survey" id="dlc-survey" role="dialog" aria-label="Feedback">
         <button class="close" id="dlc-survey-x" title="Skip">&times;</button>
-        <h4>Quick question about ${esc(FEATURE_LABEL[feature] || "that answer")}</h4>
-        <div class="q">Was this feedback helpful?</div>
-        <div class="opts">
-          <label><input type="radio" name="dlc-sv-helpful" value="yes"/> Yes</label>
-          <label><input type="radio" name="dlc-sv-helpful" value="somewhat"/> Somewhat</label>
-          <label><input type="radio" name="dlc-sv-helpful" value="no"/> No</label>
-        </div>
-        <div class="q">Did it answer your question or help you identify the problem?</div>
-        <div class="opts">
-          <label><input type="radio" name="dlc-sv-answered" value="yes"/> Yes</label>
-          <label><input type="radio" name="dlc-sv-answered" value="partially"/> Partially</label>
-          <label><input type="radio" name="dlc-sv-answered" value="no"/> No</label>
-        </div>
-        <div class="q">Optional: what could have made it more helpful?</div>
-        <textarea id="dlc-sv-comment" class="text-input" maxlength="300" placeholder="a sentence is plenty"></textarea>
-        <div class="dlc-gate-row">
-          <button id="dlc-sv-skip" class="btn-ghost">Skip</button>
-          <div class="spacer"></div>
-          <button id="dlc-sv-send" class="btn">Send</button>
-        </div>
+        <h4>Quick question about ${esc(q.intro)}</h4>
+        <div id="dlc-survey-body"></div>
       </div>`);
     document.body.appendChild(box);
     log("feedback_survey_shown", { feature, filename });
-    const pick = (n) => { const r = box.querySelector(`input[name="${n}"]:checked`); return r ? r.value : null; };
-    const skip = () => { log("feedback_survey_skipped", { feature, filename }); box.remove(); };
-    box.querySelector("#dlc-survey-x").addEventListener("click", skip);
-    box.querySelector("#dlc-sv-skip").addEventListener("click", skip);
-    box.querySelector("#dlc-sv-send").addEventListener("click", () => {
-      const helpful = pick("dlc-sv-helpful"), answered = pick("dlc-sv-answered");
-      if (!helpful && !answered) { box.querySelector("#dlc-sv-send").textContent = "Pick an answer first"; return; }
-      const comment = (box.querySelector("#dlc-sv-comment").value || "").trim().slice(0, 300);
-      log("feedback_survey", { feature, filename, helpful, answered, comment, comment_len: comment.length });
-      flush();
-      box.innerHTML = `<h4>Thank you.</h4>`;
-      setTimeout(() => box.remove(), 1200);
-    });
-    setTimeout(() => { if (document.body.contains(box) && !box.querySelector("#dlc-sv-send")) return;
-      if (document.body.contains(box)) { log("feedback_survey_timeout", { feature }); box.remove(); } }, 3 * 60 * 1000);
+
+    const finish = (reason) => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(timer);
+      const answered = Object.keys(answers).length > 0;
+      if (answered) {
+        log("feedback_survey", { feature, filename, helpful: answers.helpful || null,
+                                 answered: answers.answered || null,
+                                 comment: answers.comment || "", comment_len: (answers.comment || "").length });
+        flush();
+      } else {
+        log(reason === "timeout" ? "feedback_survey_timeout" : "feedback_survey_skipped", { feature, filename });
+      }
+      if (answered && reason === "done") {
+        box.innerHTML = `<h4>Thank you.</h4>`;
+        setTimeout(() => box.remove(), 1000);
+      } else {
+        box.remove();
+      }
+    };
+    const render = () => {
+      const body = box.querySelector("#dlc-survey-body");
+      if (step < q.steps.length) {
+        const [key, text, opts] = q.steps[step];
+        body.innerHTML = `<div class="q">${esc(text)}</div><div class="opts">${
+          opts.map(([v, label]) => `<button class="btn-ghost" data-sv="${esc(v)}">${esc(label)}</button>`).join("")}</div>`;
+        body.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
+          answers[key] = b.dataset.sv;
+          step += 1;
+          render();
+        }));
+      } else {
+        body.innerHTML = `<div class="q">Optional: what could have made it more helpful?</div>
+          <textarea id="dlc-sv-comment" class="text-input" maxlength="300" placeholder="a sentence is plenty"></textarea>
+          <div class="dlc-gate-row"><div class="spacer"></div><button id="dlc-sv-done" class="btn">Done</button></div>`;
+        body.querySelector("#dlc-sv-done").addEventListener("click", () => {
+          answers.comment = (body.querySelector("#dlc-sv-comment").value || "").trim().slice(0, 300);
+          finish("done");
+        });
+      }
+    };
+    box.querySelector("#dlc-survey-x").addEventListener("click", () => finish("skip"));
+    timer = setTimeout(() => finish("timeout"), SURVEY_TIMEOUT_MS);
+    render();
   };
 
   /* ---------------------------------------------------------- boot */
   document.addEventListener("DOMContentLoaded", async () => {
     try { await courseServerGate(); } catch {}
-    try { await consentGate(false); } catch {}
+    try { await consentGate(); } catch {}
     try { await renderResearchCard(); } catch {}
-    const btn = document.getElementById("research-change-btn");
-    if (btn) btn.addEventListener("click", () => consentGate(true).catch(() => {}));
+    watchSettingsSave();
     try { window.__dlcFirstRunDone(); } catch {}
   });
 })();
