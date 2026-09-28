@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from dlc.l3 import evidence as ev
 from dlc.l3.patch import KNOWN_OPS, apply_patch, rerun_with_patch
 from dlc.llm.client import call_llm
 from dlc.llm.guard import sanitize_output
+from dlc.llm.jsonish import extract_json_object
 from dlc.parser.dig_parser import parse_dig_file
 from dlc.parser.graph import build_signal_graph
 from dlc.parser.netlist import build_netlist
@@ -90,16 +90,16 @@ def _clean(s) -> str:
     return sanitize_output(str(s or "")).strip()
 
 def parse_agent_json(text: str) -> dict | None:
-    if not text:
-        return None
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return None
-    try:
-        obj = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
-    return obj if isinstance(obj, dict) else None
+    obj, _why = extract_json_object(text)
+    return obj
+
+
+def _parse_validate(text) -> tuple[dict | None, str | None]:
+    obj, why = extract_json_object(text)
+    if obj is None:
+        return None, (f"the reply was not a JSON object ({why})" if why
+                      else "the reply was not a JSON object")
+    return validate_hypothesis(obj)
 
 
 def validate_hypothesis(obj: dict | None) -> tuple[dict | None, str | None]:
@@ -926,8 +926,7 @@ def debug_circuit(dig_path: str, *, spec_name: str | None = None,
                                 "reason": "llm_error",
                                 "detail": reply.get("error")})
                 continue
-            clean, err = validate_hypothesis(
-                parse_agent_json(reply.get("text")))
+            clean, err = _parse_validate(reply.get("text"))
             if err is not None:
                 if reply.get("stop_reason") == "max_tokens":
                     retry_note = (
@@ -944,8 +943,7 @@ def debug_circuit(dig_path: str, *, spec_name: str | None = None,
                 retry = ask(prompt + retry_note)
                 clean = None
                 if retry.get("ok"):
-                    clean, err = validate_hypothesis(
-                        parse_agent_json(retry.get("text")))
+                    clean, err = _parse_validate(retry.get("text"))
             if clean is None:
                 dropped.append({"cluster_rows": cluster_rows,
                                 "reason": "invalid_response", "detail": err})
@@ -962,8 +960,7 @@ def debug_circuit(dig_path: str, *, spec_name: str | None = None,
                 retry = ask(prompt + _refutation_block(
                     clean["ops"], verdict, target_rows=cluster_rows))
                 if retry.get("ok"):
-                    clean2, err2 = validate_hypothesis(
-                        parse_agent_json(retry.get("text")))
+                    clean2, _err2 = _parse_validate(retry.get("text"))
                     clean2 = norm(clean2)
                     if clean2 is not None:
                         verdict2 = verify(clean2["ops"], cluster_rows)
@@ -1025,8 +1022,7 @@ def debug_circuit(dig_path: str, *, spec_name: str | None = None,
                     reply = ask(prompt)
                     if not reply.get("ok"):
                         continue
-                    clean, _err = validate_hypothesis(
-                        parse_agent_json(reply.get("text")))
+                    clean, _err = _parse_validate(reply.get("text"))
                     clean = norm(clean)
                     if clean is None:
                         continue

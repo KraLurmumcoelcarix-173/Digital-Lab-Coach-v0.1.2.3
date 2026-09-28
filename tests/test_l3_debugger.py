@@ -124,6 +124,16 @@ def test_double_garbage_becomes_dropped_idea():
     assert res["llm_calls"] == 2
     assert res["cards"] == []
     assert [d["reason"] for d in res["dropped_ideas"]] == ["invalid_response"]
+    assert "not a JSON object" in res["dropped_ideas"][0]["detail"]
+
+
+def test_reply_one_brace_short_is_not_a_format_error():
+    call = _fake([json.dumps(_reply(GOOD_OPS))[:-1]])
+    res = debug_circuit(_BUG3, call=call, use_manifest=False,
+                        failing_indices=[0, 1])
+    assert res["llm_calls"] == 1
+    assert len(res["cards"]) == 1 and res["cards"][0]["verified"]["confirmed"]
+    assert res["dropped_ideas"] == []
 
 
 def test_refuted_fix_earns_one_retry_with_evidence():

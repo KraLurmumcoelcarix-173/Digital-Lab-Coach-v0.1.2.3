@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from dlc.l3.coverage import TreeCoverageReport, scan_tree_coverage
 from dlc.l3.oracle import InjectedRow, validate_rows
 from dlc.llm.client import DEFAULT_MODEL, call_llm
+from dlc.llm.jsonish import extract_json_object
 from dlc.parser.dig_parser import parse_dig_file
 from dlc.testing.spec import _tokenize, extract_test_specs, match_variables_to_io
 
@@ -136,14 +136,8 @@ def build_prompt(report: TreeCoverageReport, targets: list[dict]) -> str:
             .replace("<<TARGETS_JSON>>", json.dumps(targets, indent=1)))
 
 def parse_proposals(text: str) -> list[dict]:
-    if not text:
-        return []
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return []
-    try:
-        obj = json.loads(m.group(0))
-    except json.JSONDecodeError:
+    obj, _why = extract_json_object(text)     # tolerant of a cut-off tail
+    if obj is None:
         return []
     raw = obj.get("proposals")
     if not isinstance(raw, list):
@@ -945,14 +939,14 @@ def _selfcheck_gate(valid, rejected, notes, targets, call, used_model):
                      "inject verification unchecked.")
         return valid, rejected, notes
 
-    m = re.search(r"\{.*\}", resp.get("text") or "", re.S)
+    obj, _why = extract_json_object(resp.get("text") or "")
     derived: dict[int, dict] = {}
-    if m:
+    if obj is not None:
         try:
-            for r in json.loads(m.group(0)).get("rows", []):
+            for r in obj.get("rows", []):
                 if isinstance(r, dict) and isinstance(r.get("outputs"), dict):
                     derived[int(r.get("index", -1))] = r["outputs"]
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (TypeError, ValueError):
             pass
 
     drop: set[tuple[int, int]] = set()
