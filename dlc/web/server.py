@@ -1321,7 +1321,57 @@ def _telemetry_boot() -> None:
         }])
     except Exception:
         pass
+
+    def _refresh_study():
+        try:
+            from dlc.telemetry import consent
+            consent.study_info(refresh=True)
+        except Exception:
+            pass
+    threading.Thread(target=_refresh_study, daemon=True).start()
     _ship_soon()
+
+
+# research
+# The consent sheet ships with the tool; the course server says whether a
+# study is on (its /v1/health carries study_id). See dlc/telemetry/consent.py.
+
+class ConsentRequest(BaseModel):
+    decision: str
+    name: str | None = None
+    signature: str | None = None
+
+
+@app.get("/api/consent/state")
+def consent_state(refresh: bool = False) -> dict:
+    from dlc.telemetry import consent
+    return consent.public_state(refresh=refresh)
+
+
+@app.get("/api/consent/text")
+def consent_text_endpoint():
+    from fastapi.responses import PlainTextResponse
+    from dlc.telemetry import consent
+    return PlainTextResponse(consent.consent_text())
+
+
+@app.post("/api/consent")
+def consent_decide(req: ConsentRequest) -> dict:
+    from dlc.telemetry import consent
+    try:
+        out = consent.record(req.decision, req.name or "", req.signature)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if out["decision"] == "agreed":
+        try:
+            log_events(None, [{"kind": "consent_recorded",
+                               "decision": "agreed",
+                               "version": out["version"],
+                               "study_id": consent.study_info().get("study_id")}])
+        except Exception:
+            pass
+    _ship_soon()
+    return {**out, "state": consent.public_state()}
 
 
 
@@ -1374,6 +1424,12 @@ def set_proxy_config(req: ProxyConfigRequest) -> dict:
     if url:
         out["verify"] = _verify_course_server(
             cfg.get("proxy_url", ""), cfg.get("proxy_token"))
+    if url:
+        try:
+            from dlc.telemetry import consent
+            out["study_id"] = consent.study_info(refresh=True).get("study_id")
+        except Exception:
+            pass
     return out
 
 
@@ -1663,12 +1719,38 @@ def llm_grade(req: LlmGradeRequest) -> dict:
         grader_model=req.grader_model,
     )
 
+def _open_browser_when_ready(url: str, host: str, port: int,
+                             timeout: float = 240.0) -> None:
+    """Open the browser only once the server answers on its port, so the
+    first start (which can take a minute) never shows an error page."""
+    import socket
+    import webbrowser
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.25)
+    else:
+        return
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
 def main() -> None:
     import uvicorn
+    host, port = "127.0.0.1", 8765
+    if os.environ.get("DLC_OPEN_BROWSER", "").strip() in ("1", "true", "yes"):
+        threading.Thread(
+            target=_open_browser_when_ready,
+            args=(f"http://{host}:{port}", host, port), daemon=True).start()
     uvicorn.run(
         "dlc.web.server:app",
-        host="127.0.0.1",
-        port=8765,
+        host=host,
+        port=port,
         reload=False,
         log_level="info",
     )
