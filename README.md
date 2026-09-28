@@ -104,6 +104,11 @@ hashed machine id only. Related codes are public
 and stored at proxy/ and telemetry/, DLC never modifies a student's 
 uploaded files. Events sync to the course server for course-improvement research.
 This process begins if and only if admin gains IRB permission from the department. 
+When the course server declares a study, DLC asks each student once, on the
+first start after connecting, with the UNC information sheet
+(`data/consent/COMP311_fa26.md`). Only machines whose student agreed ever send
+events; a declined machine records nothing at all. A short optional feedback
+question follows some coach answers on agreed machines.
 The first round of experimental use is planned to be shut down around December.
 
 When instructor's proxy server shuts down, DLC's AI features will be offline regardless
