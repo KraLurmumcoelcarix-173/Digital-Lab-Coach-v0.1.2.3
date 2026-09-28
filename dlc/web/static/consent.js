@@ -241,8 +241,9 @@ window.dlcFirstRun = new Promise((resolve) => { window.__dlcFirstRunDone = resol
     if (!studyState || !studyState.study_id || studyState.decision !== "agreed") return false;
     if (consentOpen || document.getElementById("dlc-survey")) return false;
     if (force) return true;
-    const rate = Number(studyState.survey_rate || 0) * q.rate;
-    if (!(rate > 0)) return false;
+    let seen = "";
+    try { seen = localStorage.getItem("dlc_survey_last") || ""; } catch {}
+    if (!seen) return true;
     if ((surveyShown[feature] || 0) >= SURVEY_MAX_PER_FEATURE) return false;
     let last = 0; try { last = Number(localStorage.getItem("dlc_survey_last") || 0); } catch {}
     if (Date.now() - last < SURVEY_MIN_GAP_MS) return false;
