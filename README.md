@@ -16,12 +16,12 @@ education and explore new means of interactive hardware design debugging.
 ![Dashboard view of mode A gif](docs/screenshots/modeA_sample.gif)
 
 ## Status
-v0.1.2.3 (2026/9/24) — The course proxy runs on Carolina CloudApps, admin page rewritten.
-v0.1.2.2 (2026/9/23) — Option A (local proxy + LAN) setup flow rewritten.
-v0.1.2.1 (2026/9/17) — Interface available in multi-language && a few small bug fixing.
-v0.1.2 (2026/9/10) — Mode A supports higher fixes with optimized latency and cost, signal flow walkthrough feature added in Layer 2.
-v0.1.1 (2026/8/24) — Supports 311 Digital transistor lab.
-v0.1.0 (2026/8/23) — first packaged release.
+v0.1.2.3 (2026/9/24): The course proxy runs on Carolina CloudApps, admin page rewritten.
+v0.1.2.2 (2026/9/23): Option A (local proxy + LAN) setup flow rewritten.
+v0.1.2.1 (2026/9/17): Interface available in multi-language && a few small bug fixing.
+v0.1.2 (2026/9/10): Mode A supports higher fixes with optimized latency and cost, signal flow walkthrough feature added in Layer 2.
+v0.1.1 (2026/8/24): Supports 311 Digital transistor lab.
+v0.1.0 (2026/8/23): first packaged release.
 
 ## Table of contents
 
