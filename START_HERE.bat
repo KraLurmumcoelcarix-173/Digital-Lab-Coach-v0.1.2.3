@@ -35,7 +35,9 @@ if errorlevel 1 (
 )
 
 set DLC_ENFORCE_LIMITS=1
+rem The server opens the browser itself, the moment it is ready to answer.
+set DLC_OPEN_BROWSER=1
 echo Starting Digital Lab Coach at http://127.0.0.1:8765 ...
-start "" cmd /c "timeout /t 4 >nul & start http://127.0.0.1:8765"
+echo Your browser opens by itself when the app is ready (the first start can take a minute).
 uv run python -m dlc.web.server
 pause
