@@ -21,6 +21,8 @@ from dlc.telemetry import ship, sink
 def tele_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DLC_TELEMETRY_DB", str(tmp_path / "tele.db"))
     monkeypatch.setenv("DLC_MACHINE_CACHE", str(tmp_path / "machine.json"))
+    monkeypatch.setenv("DLC_CONSENT_PATH", str(tmp_path / "consent.json"))
+    monkeypatch.setenv("DLC_STUDY_CACHE", str(tmp_path / "study.json"))
     monkeypatch.setenv("DLC_PROXY_DB", str(tmp_path / "proxy.db"))
     monkeypatch.delenv("DLC_PROXY_URL", raising=False)
     monkeypatch.setenv("DLC_COURSE_TOKEN", "tok")
@@ -227,6 +229,8 @@ def test_fresh_spool_never_reuses_shipped_row_ids(tele_env, monkeypatch):
 def test_ship_moves_spool_to_proxy_and_survives_offline(tele_env,
                                                         monkeypatch):
     monkeypatch.setattr(mach, "_raw_machine_identifier", lambda: "G-1")
+    from dlc.telemetry import consent
+    consent.record("agreed", name="Test Student")
     sink.log_events("sess1", [{"kind": "upload", "count": 1},
                               {"kind": "tests_run_complete", "ok": True}])
     assert ship.ship_pending()["reason"] == "no_proxy"

@@ -1,5 +1,3 @@
-"""Research consent test"""
-
 import json
 import time
 
@@ -49,6 +47,9 @@ def _wire_proxy(monkeypatch, study_id="26-2770"):
     monkeypatch.setenv("DLC_PROXY_URL", "http://proxy.test")
     return pc
 
+
+# module
+
 def test_version_follows_the_sheet_text(cenv):
     v1 = consent.consent_version()
     assert len(v1) == 12
@@ -56,10 +57,11 @@ def test_version_follows_the_sheet_text(cenv):
     assert consent.consent_version() != v1
 
 
-def test_no_study_means_nothing_is_asked_and_telemetry_behaves_as_before(cenv):
+def test_no_study_means_nothing_is_asked_and_nothing_ever_ships(cenv):
     assert consent.study_active() is False
     assert consent.consent_required() is False
-    assert consent.telemetry_allowed() and consent.shipping_allowed()
+    assert consent.telemetry_allowed() is True
+    assert consent.shipping_allowed() is False
     assert sink.log_events("s", [{"kind": "upload", "count": 1}]) == 1
 
 
@@ -76,9 +78,11 @@ def test_agree_then_decline_purges_the_local_spool(cenv, monkeypatch):
     monkeypatch.setenv("DLC_LOCAL_STUDY_ID", "26-2770")
     with pytest.raises(ValueError):
         consent.record("agreed", name="")
+    sink.log_events("s", [{"kind": "app_start"}])
     out = consent.record("agreed", name="Ada Lovelace",
                          signature="data:image/png;base64,iVBORw0KGgo=")
     assert out["decision"] == "agreed" and out["synced"] is False
+    assert out["purged"] == 1
     assert consent.consent_required() is False
     assert consent.shipping_allowed() is True
     st = json.loads((cenv / "consent.json").read_text())
@@ -99,6 +103,9 @@ def test_new_sheet_version_asks_again_but_keeps_the_last_decision(cenv, monkeypa
     assert consent.consent_required() is True
     assert consent.decision() == "agreed" and consent.shipping_allowed() is True
 
+
+# app endpoints
+
 def test_app_endpoints_state_text_and_decision(cenv, monkeypatch):
     monkeypatch.setenv("DLC_LOCAL_STUDY_ID", "26-2770")
     c = TestClient(app)
@@ -116,6 +123,9 @@ def test_app_endpoints_state_text_and_decision(cenv, monkeypatch):
     assert r.json()["state"]["decision"] == "declined"
     r = c.post("/api/consent", json={"decision": "maybe"})
     assert r.status_code == 400
+
+
+# with proxy
 
 def test_study_is_read_from_the_course_server_health(cenv, monkeypatch):
     pc = _wire_proxy(monkeypatch, study_id="26-2770")

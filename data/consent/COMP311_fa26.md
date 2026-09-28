@@ -2,6 +2,8 @@
 
 **IRB Study #:** 26-2770
 **Study Title:** COMP311: Digital Lab Coach Tool Evaluation
+**Principal Investigator:** <<PI name>>
+**PI Phone Number:** 919-590-6000
 
 The purpose of this research study is to understand how students use the
 Digital Lab Coach while debugging digital circuit labs, and whether its
@@ -21,10 +23,9 @@ features you click, what its structural checks and tests reported, how the
 AI coach answered, and, between two uploads of the same file, how many
 components and wires changed. It never records your circuit itself, your
 name, or any file you upload. From time to time, after the coach answers,
-the tool may show a short three-question feedback box that takes under a
-minute; answering is optional. Your participation lasts for the Fall 2026
-semester. We expect that <<expected number of subjects>> people will take
-part in this research study.
+the tool may show a short feedback box that takes under a minute; answering
+is optional. Your participation lasts for the Fall 2026 semester. We expect 
+that <<expected number of subjects>> people will take part in this research study.
 
 The possible risks to you in taking part in this research are minimal. There
 is a small risk of loss of confidentiality of the usage data; the measures
@@ -37,9 +38,8 @@ used only to document consent. Usage data is stored on a course server run
 by the research team, is visible only to the research team, and is deleted
 if you withdraw.
 
-You may withdraw at any time from Settings → Research participation in the
-tool. Withdrawing turns recording off on your computer and removes your
-usage data from the course server.
+If you later wish to withdraw, contact the research team named above; your usage
+data will then be removed from the course server.
 
 If you have any questions about this research, please contact the
 Investigator named at the top of this form. If you have questions or
