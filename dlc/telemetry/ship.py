@@ -35,6 +35,13 @@ def ship_pending(timeout: float = 6.0) -> dict:
     url, token = proxy_config()
     if not url:
         return {"shipped": 0, "reason": "no_proxy"}
+    try:
+        from dlc.telemetry import consent
+        consent.sync_pending(timeout=timeout)
+        if not consent.shipping_allowed():
+            return {"shipped": 0, "reason": "consent"}
+    except Exception:
+        pass
     ident = machine_identity()
     try:
         conn = _conn()

@@ -47,6 +47,12 @@ def _connect() -> sqlite3.Connection:
 
 
 def log_events(session_id: str | None, events: list[dict]) -> int:
+    try:
+        from dlc.telemetry import consent
+        if not consent.telemetry_allowed():
+            return 0
+    except Exception:
+        pass
     rows = []
     now = time.time()
     for ev in events or []:
