@@ -105,7 +105,40 @@ def _db() -> sqlite3.Connection:
     except sqlite3.OperationalError:
         pass
     _migrate_events_key(conn)
+    conn.executescript(_CONSENT_SCHEMA)
     return conn
+
+
+# Research consent records live in their own table: the typed name and the
+# drawn signature sit here and nowhere else; the usage data in `events` only
+# ever carries the hashed install id (the study code).
+_CONSENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS consents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    install_id TEXT NOT NULL,
+    study_id TEXT,
+    version TEXT,
+    decision TEXT NOT NULL,
+    name TEXT,
+    signature TEXT,
+    app_version TEXT,
+    decided_at REAL,
+    received_at REAL NOT NULL,
+    UNIQUE(install_id, version, decision, decided_at)
+);
+CREATE INDEX IF NOT EXISTS idx_consent_machine ON consents(install_id);
+"""
+
+
+def _study_id() -> str | None:
+    return os.environ.get("DLC_STUDY_ID", "").strip() or None
+
+
+def _survey_rate() -> float:
+    try:
+        return max(0.0, min(1.0, float(os.environ.get("DLC_SURVEY_RATE", "") or 0.35)))
+    except ValueError:
+        return 0.35
 
 
 def _migrate_events_key(conn: sqlite3.Connection) -> None:
@@ -241,6 +274,55 @@ class LlmIn(BaseModel):
     effort: str | None = None
 
 
+class ConsentIn(BaseModel):
+    install_id: str
+    study_id: str | None = None
+    version: str | None = None
+    decision: str
+    name: str | None = None
+    signature: str | None = None
+    app_version: str | None = None
+    decided_at: float | None = None
+
+
+@app.post("/v1/consent")
+def consent_ingest(req: ConsentIn,
+                   x_dlc_token: str | None = Header(default=None)) -> dict:
+    _check_course_token(x_dlc_token)
+    if req.decision not in ("agreed", "declined"):
+        raise HTTPException(status_code=400, detail="decision must be agreed or declined")
+    if not req.install_id:
+        raise HTTPException(status_code=400, detail="install_id required")
+    sig = req.signature
+    if sig is not None and (not isinstance(sig, str)
+                            or not sig.startswith("data:image/png;base64,")
+                            or len(sig) > 400_000):
+        sig = None
+    conn = _db()
+    try:
+        _touch_machine(conn, req.install_id, None, None, req.app_version)
+        removed = 0
+        with conn:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO consents (install_id, study_id, version,"
+                " decision, name, signature, app_version, decided_at, received_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (req.install_id, req.study_id, req.version, req.decision,
+                 (req.name or "").strip()[:120] if req.decision == "agreed" else "",
+                 sig if req.decision == "agreed" else None,
+                 req.app_version,
+                 req.decided_at if req.decided_at is not None else time.time(),
+                 time.time()))
+            stored = cur.rowcount
+            if req.decision == "declined":
+                removed = conn.execute(
+                    "DELETE FROM events WHERE install_id = ?",
+                    (req.install_id,)).rowcount
+        return {"ok": True, "stored": int(stored), "events_removed": int(removed)}
+    finally:
+        conn.close()
+
+
 @app.post("/v1/llm")
 def relay(req: LlmIn,
           x_dlc_token: str | None = Header(default=None)) -> dict:
@@ -359,7 +441,9 @@ def health() -> dict:
                 "today_calls": day_calls,
                 "today_est_usd": round(_est_usd(conn, day), 2),
                 "global_daily_calls": _global_daily_calls(),
-                "global_daily_usd": _global_daily_usd()}
+                "global_daily_usd": _global_daily_usd(),
+                "study_id": _study_id(),
+                "survey_rate": _survey_rate() if _study_id() else 0.0}
     finally:
         conn.close()
 
@@ -719,16 +803,88 @@ def _est_usd_since(conn, since: str) -> float:
     return spend
 
 
+@app.get("/admin/research")
+def admin_research(token: str | None = Query(default=None),
+                   x_dlc_admin_token: str | None = Header(default=None)) -> dict:
+    _check_admin(token, x_dlc_admin_token)
+    conn = _db()
+    try:
+        latest: dict[str, dict] = {}
+        for iid, sid, ver, dec, has_sig, dat, ver_app in conn.execute(
+                "SELECT install_id, study_id, version, decision,"
+                " signature IS NOT NULL, decided_at, app_version"
+                " FROM consents ORDER BY COALESCE(decided_at, received_at)"):
+            latest[iid] = {"install_id": iid, "study_id": sid, "version": ver,
+                           "decision": dec, "has_signature": bool(has_sig),
+                           "decided_at": dat, "app_version": ver_app}
+        rows = sorted(latest.values(),
+                      key=lambda r: r.get("decided_at") or 0, reverse=True)
+        agreed = sum(1 for r in rows if r["decision"] == "agreed")
+        declined = sum(1 for r in rows if r["decision"] == "declined")
+        (machines,) = conn.execute("SELECT COUNT(*) FROM machines").fetchone()
+        helpful: dict[str, int] = {}
+        answered: dict[str, int] = {}
+        by_feature: dict[str, int] = {}
+        comments: list[dict] = []
+        n = 0
+        for iid, ts, props in conn.execute(
+                "SELECT install_id, COALESCE(client_ts, received_at), props"
+                " FROM events WHERE kind = 'feedback_survey'"
+                " ORDER BY COALESCE(client_ts, received_at) DESC"):
+            try:
+                p = json.loads(props)
+            except (TypeError, ValueError):
+                p = {}
+            n += 1
+            h, a = p.get("helpful"), p.get("answered")
+            if h:
+                helpful[h] = helpful.get(h, 0) + 1
+            if a:
+                answered[a] = answered.get(a, 0) + 1
+            f = p.get("feature") or "?"
+            by_feature[f] = by_feature.get(f, 0) + 1
+            if p.get("comment") and len(comments) < 100:
+                comments.append({"install_id": iid, "ts": ts, "feature": f,
+                                 "helpful": h, "answered": a,
+                                 "comment": str(p["comment"])[:300]})
+        (shown,) = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE kind = 'feedback_survey_shown'"
+        ).fetchone()
+        (skipped,) = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE kind = 'feedback_survey_skipped'"
+        ).fetchone()
+        return {"study_id": _study_id(), "survey_rate": _survey_rate(),
+                "consents": rows,
+                "counts": {"agreed": agreed, "declined": declined,
+                           "machines": machines,
+                           "undecided": max(0, machines - agreed - declined)},
+                "survey": {"responses": n, "shown": shown, "skipped": skipped,
+                           "helpful": helpful, "answered": answered,
+                           "by_feature": by_feature, "comments": comments}}
+    finally:
+        conn.close()
+
+
 @app.get("/admin/export.csv", response_class=PlainTextResponse)
 def export_csv(token: str | None = Query(default=None),
                x_dlc_admin_token: str | None = Header(default=None),
                table: str = Query(default="events")) -> str:
     _check_admin(token, x_dlc_admin_token)
-    if table not in ("events", "machines", "llm_calls"):
+    if table not in ("events", "machines", "llm_calls", "consents", "surveys"):
         raise HTTPException(status_code=400, detail="unknown table")
     conn = _db()
     try:
-        cur = conn.execute(f"SELECT * FROM {table}")
+        if table == "surveys":
+            cur = conn.execute(
+                "SELECT install_id, COALESCE(client_ts, received_at) AS ts,"
+                " json_extract(props, '$.feature') AS feature,"
+                " json_extract(props, '$.filename') AS filename,"
+                " json_extract(props, '$.helpful') AS helpful,"
+                " json_extract(props, '$.answered') AS answered,"
+                " json_extract(props, '$.comment') AS comment"
+                " FROM events WHERE kind = 'feedback_survey' ORDER BY ts")
+        else:
+            cur = conn.execute(f"SELECT * FROM {table}")
         cols = [d[0] for d in cur.description]
         lines = [",".join(cols)]
         for row in cur:
@@ -839,6 +995,7 @@ _ADMIN_PAGE = """<!doctype html>
      <button id="tab-activity">Activity</button>
      <button id="tab-ai">AI outputs</button>
      <button id="tab-stats">Stats</button>
+     <button id="tab-research">Research</button>
    </div>
    <div id="dbline"></div>
    <div class="filters">
@@ -890,6 +1047,18 @@ _ADMIN_PAGE = """<!doctype html>
        <div id="st-kinds"></div></div>
      <div class="cardbox"><h2 style="margin-top:0">Spend by day</h2>
        <div id="st-spend"></div></div>
+   </section>
+   <section id="sec-research" style="display:none">
+     <div class="tiles" id="rs-tiles"></div>
+     <div class="cardbox"><h2 style="margin-top:0">Feedback survey
+       <span class="muted" style="font-weight:normal">— asked at random after a coach answer, consenting students only</span></h2>
+       <div class="tiles" id="rs-survey" style="margin-bottom:8px"></div>
+       <div id="rs-comments"></div></div>
+     <div class="cardbox"><h2 style="margin-top:0">Consent decisions
+       <span class="muted" style="font-weight:normal">— latest per machine; typed names and signatures are only in the CSV export</span></h2>
+       <div id="rs-consents"></div>
+       <p class="muted">Exports: <a id="rs-x-consents" href="#">consents.csv</a> ·
+         <a id="rs-x-surveys" href="#">surveys.csv</a></p></div>
    </section>
  </div>
 </main>
@@ -1013,6 +1182,16 @@ function describe(kind,p){
     case "settings_proxy_saved": return "connected to the course server";
     case "settings_proxy_cleared": return "disconnected from the course server";
     case "settings_official_test_saved": return `official test saved ${f}`;
+    case "connect_gate_saved": return `first-run: connected to the course server (${esc(p.verify||"?")})`;
+    case "connect_gate_skipped": return "first-run: skipped the course-server step";
+    case "consent_shown": return `research consent sheet shown${p.version?` (sheet ${esc(p.version)})`:""}`;
+    case "consent_agreed":
+    case "consent_recorded": return `student AGREED to the research study${p.version?` (sheet ${esc(p.version)})`:""}`;
+    case "feedback_survey_shown": return `feedback question shown after ${esc(p.feature||"?")}${f?" on "+f:""}`;
+    case "feedback_survey_skipped": return `feedback question skipped (${esc(p.feature||"?")})`;
+    case "feedback_survey_timeout": return `feedback question closed unanswered (${esc(p.feature||"?")})`;
+    case "feedback_survey":
+      return `feedback on ${esc(p.feature||"?")}${f?" for "+f:""}: helpful=${esc(p.helpful||"–")}, answered=${esc(p.answered||"–")}${p.comment?` — “${esc(String(p.comment).slice(0,120))}”`:""}`;
     default: {
       const t=kv(p);
       return esc(kind)+(t?` — ${esc(t.length>150?t.slice(0,150)+"…":t)}`:"");
@@ -1209,22 +1388,55 @@ async function loadAggregates(){
    ["install_id","first_seen","last_seen","id_source","app_version",
     "events","llm_calls"]);
 }
+async function loadResearch(){
+  const d=await api("/admin/research");
+  const c=d.counts||{};
+  const fmt=(t)=>t?new Date(t*1000).toLocaleString():"";
+  $("rs-tiles").innerHTML=[
+    [d.study_id||"none","study id (DLC_STUDY_ID)",!d.study_id],
+    [c.agreed??0,"agreed"],[c.declined??0,"declined"],
+    [c.undecided??0,"machines with no decision yet"],
+    [Math.round((d.survey_rate||0)*100)+"%","survey chance per coach answer"],
+  ].map(([v,l,warn])=>`<div class="tile"><b class="${warn?"warn":""}">${esc(String(v))}</b><span>${l}</span></div>`).join("");
+  const s=d.survey||{};
+  const tally=(o,keys)=>keys.map(k=>`${k} ${o[k]||0}`).join(" · ");
+  $("rs-survey").innerHTML=[
+    [s.responses??0,"answers"+(s.shown?` (${s.shown} shown, ${s.skipped||0} skipped)`:"")],
+    [tally(s.helpful||{},["yes","somewhat","no"]),"was this feedback helpful?"],
+    [tally(s.answered||{},["yes","partially","no"]),"did it answer the question?"],
+    [Object.entries(s.by_feature||{}).map(([k,v])=>`${k} ${v}`).join(" · ")||"–","by feature"],
+  ].map(([v,l])=>`<div class="tile"><b style="font-size:15px">${esc(String(v))}</b><span>${l}</span></div>`).join("");
+  $("rs-comments").innerHTML=(s.comments||[]).length
+    ?table((s.comments||[]).map(r=>({when:fmt(r.ts),machine:`<code class="mid">${esc((r.install_id||"").slice(0,8))}</code>`,
+        feature:esc(r.feature||""),helpful:esc(r.helpful||""),answered:esc(r.answered||""),comment:esc(r.comment||"")})),
+        ["when","machine","feature","helpful","answered","comment"])
+    :`<p class="muted">no free-text comments yet</p>`;
+  $("rs-consents").innerHTML=(d.consents||[]).length
+    ?table((d.consents||[]).map(r=>({machine:`<code class="mid">${esc((r.install_id||"").slice(0,8))}</code>`,
+        decision:r.decision==="agreed"?"agreed":"<span class=warn>declined</span>",when:fmt(r.decided_at),
+        sheet:esc(r.version||""),signature:r.has_signature?"drawn":"typed only",app:esc(r.app_version||"")})),
+        ["machine","decision","when","sheet","signature","app"])
+    :`<p class="muted">no decisions recorded yet</p>`;
+  $("rs-x-consents").href="/admin/export.csv?table=consents&token="+encodeURIComponent(tok());
+  $("rs-x-surveys").href="/admin/export.csv?table=surveys&token="+encodeURIComponent(tok());
+}
 function showTab(t){
   state.tab=t;
-  for(const x of ["overview","activity","ai","stats"]){
+  for(const x of ["overview","activity","ai","stats","research"]){
     $("sec-"+x).style.display=x===t?"":"none";
     $("tab-"+x).classList.toggle("on",x===t);
   }
   $("l-kind").style.display=t==="activity"?"":"none";
   $("l-feat").style.display=t==="ai"?"":"none";
   for(const id of ["f-day","f-mach","f-pp"])
-    $(id).parentElement.style.display=t==="stats"?"none":"";
+    $(id).parentElement.style.display=(t==="stats"||t==="research")?"none":"";
   reloadTab();
 }
 function reloadTab(){
   if(state.tab==="overview")loadAggregates();
   else if(state.tab==="activity")loadActivity();
   else if(state.tab==="ai")loadAi();
+  else if(state.tab==="research")loadResearch();
   else loadStats();
 }
 function setRange(n){
@@ -1255,6 +1467,7 @@ $("tab-overview").onclick=()=>showTab("overview");
 $("tab-activity").onclick=()=>showTab("activity");
 $("tab-ai").onclick=()=>showTab("ai");
 $("tab-stats").onclick=()=>showTab("stats");
+$("tab-research").onclick=()=>showTab("research");
 $("rng-7").onclick=()=>setRange(7);
 $("rng-30").onclick=()=>setRange(30);
 $("go").onclick=async()=>{setTok($("tok").value.trim());
