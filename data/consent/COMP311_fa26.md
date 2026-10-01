@@ -1,8 +1,11 @@
 # University of North Carolina at Chapel Hill — Research Information Sheet
 
 **IRB Study #:** 26-2770
+
 **Study Title:** COMP311: Digital Lab Coach Tool Evaluation
-**Principal Investigator:** <<PI name>>
+
+**Principal Investigator:** Kaki Ryan
+
 **PI Phone Number:** 919-590-6000
 
 The purpose of this research study is to understand how students use the

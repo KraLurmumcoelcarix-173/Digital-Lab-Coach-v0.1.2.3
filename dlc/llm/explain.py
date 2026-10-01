@@ -26,25 +26,30 @@ def _load_prompt(name: str) -> str:
 
 
 SYLLABUS_311 = """\
-Lecture 4: Transistors, Intro to CMOS Gates
-Lecture 5: Logic Gates
-Lecture 6-7: Multiplexers, Gate Minimization 
-Lecture 8: Karnaugh Maps (K-Maps)
-Lecture 9: Circuit Design: A Priority Encoder, Basic Adder Circuits
-Lecture 10: Arithmetic Circuits (Adder/Subtractors, Shifters), R-Type and I-Type Instructions
-Lecture 11: Introducing the ALU
-Lecture 12: Building the ALU, The Register File
-Lecture 13: Intro to Timing Analysis
-Lecture 14: Computer Performance Metrics, More Timing Analysis
-Lecture 15: Intro to Pipelining
-Lecture 16: Loads, Stores, Memory
-Lecture 17: More RISC-V Programming, Pipelining a CPU
-Lecture 18: The 5 Stage RISC-V CPU
-Lecture 19: RISC-V Programming with Procedures
-Lecture 20: More Stack Review and RISC-V Calling Convention
-Lecture 21: Pipeline Hazards
-Lecture 22: Source Bypassing/Forwarding
-Lecture 23: Intro to Memory
+Lecture 0: Welcome, Introduction
+Lecture 1: RISC-V Registers, Operands, Arithmetic Instructions
+Lecture 2: Binary, Hexadecimal, Signed and Unsigned Integers
+Lecture 3: Addition, Subtraction, Overflow, Logical Operations, Shifts
+Lecture 4: Memory, Addresses, lw, sw, Arrays
+Lecture 5: Comparisons, Branches, Intro to Loops
+Lecture 6: Conditionals, Loops, Arrays, Translation Practice
+Lecture 7: Procedures, Arguments, Return Values, jal, jalr
+Lecture 8: Stack Frames, Intro to Recursion
+Lecture 9: Recursion Synthesis, Machine-Code Encoding, RISC-V Instruction Formats
+Lecture 10: Wide Immediates, Addresses, Assembly, Linking, Loading
+Lecture 11: ISA Synthesis, Transition to Hardware
+Lecture 12: Gates, Truth Tables, Boolean Expressions, Abstraction
+Lecture 13: Combinational Logic, Muxes, Decoders, Reusable Components
+Lecture 14: Adders, Subtraction, Comparison, ALU Construction
+Lecture 15: Clocks, State, Flip-Flops, Registers
+Lecture 16: Register Files, Memory Components, Timing Conventions
+Lecture 17: Register-Transfer View, Datapath Preview
+Lecture 18: Datapath for R-Type and Immediate Instructions
+Lecture 19: Extending the Datapath for Loads and Stores
+Lecture 20: Branches, Jumps, Immediate Generation, Control
+Lecture 21: Complete Processor, Critical Path, Pipeline Motivation
+Lecture 22: Performance Equation, Single-Cycle Limitations, Pipeline Motivation
+Lecture 23: Five-Stage Pipelined Datapath, Pipeline Control
 Lecture 24: Caching, RAM
 Lecture 25: Caching, Stack Review, Hardware Security Conceptual expanding
 """
